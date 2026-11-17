@@ -1,18 +1,6 @@
-# Original hackathon brief — kept locally
-docs/original-brief.md
-
-# Design / process docs — Joe will include these toward the end
-SPEC.md
-DESIGN.md
-SECURITY.md
-SETUP.md
-INSTALL_STEPS.md
-SCAFFOLD_INSTALL.md
-SPEND_GUARDRAILS.md
-SKILLS_INSTALL.md
-ESCROW_DESIGN.md
-RESEARCH_DIGEST.md
-INTEGRATION_BRIEF.md
+# Design / research / process notes + original brief — Joe decides later what to include
+notes/
+docs/
 
 # AI agent config — installed skills are restored via skills-lock.json
 .agents/

@@ -1,0 +1,130 @@
+/**
+ * Thin viem adapter for Arc testnet AuctionEscrow. All RPC/timeout handling here;
+ * the rest of the caller layer depends only on the ChainPort interface.
+ * Reads on-chain amounts as bigint; no number conversion except bounded helpers.
+ */
+import { createPublicClient, createWalletClient, http, parseAbiItem, type Address, type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { defineChain } from "viem";
+import type { ChainPort } from "./submit-bid";
+import type { ChainEvent, EventKey } from "./reconcile";
+import type { Bid } from "./decide";
+
+export const arcTestnet = defineChain({
+  id: 5042002,
+  name: "Arc Testnet",
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.testnet.arc.io"] } },
+  blockExplorers: { default: { name: "Arcscan", url: "https://explorer.testnet.arc.io" } },
+});
+
+export const USDC_ARC = "0x3600000000000000000000000000000000000000" as const;
+
+const EVENT_ABI = [
+  parseAbiItem("event BidPlaced(uint256 indexed lotId, address indexed bidder, uint96 amount, address indexed prevBidder, uint96 prevAmount, address seller)"),
+  parseAbiItem("event RefundQueued(address indexed bidder, uint256 amount)"),
+  parseAbiItem("event RefundClaimed(address indexed bidder, uint256 amount)"),
+  parseAbiItem("event LotSettled(uint256 indexed lotId, address indexed bidder, uint96 amount, address indexed seller)"),
+  parseAbiItem("event EmergencyRefund(uint256 indexed lotId, address indexed bidder, uint96 amount)"),
+  parseAbiItem("event AuctioneerChanged(address oldAuctioneer, address newAuctioneer)"),
+] as const;
+
+const ESCROW_ABI = [
+  parseAbiItem("function approve(address spender, uint256 amount) returns (bool)"),
+  parseAbiItem("function placeBid(uint256 lotId, uint96 amount, address seller)"),
+] as const;
+
+export type ChainAdapterConfig = {
+  escrowAddress: Address;
+  /** Server-held agent wallets keyed by agentId (demo keys; testnet only). */
+  agentKeys: Record<string, `0x${string}`>;
+  rpcUrl?: string;
+  timeoutMs?: number;
+};
+
+/** Build a ChainPort backed by viem against Arc testnet. */
+export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
+  const publicClient = createPublicClient({
+    chain: arcTestnet,
+    transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io", { timeout: config.timeoutMs ?? 15_000 }),
+  });
+
+  const accounts = new Map<string, ReturnType<typeof privateKeyToAccount>>();
+  for (const [id, key] of Object.entries(config.agentKeys)) accounts.set(id, privateKeyToAccount(key));
+
+  async function submitPlaceBid(bid: Bid, agentId: string): Promise<{ txHash: string; fromBlock: bigint }> {
+    const account = accounts.get(agentId);
+    if (!account) throw new Error(`no server wallet for agent ${agentId}`);
+    const wallet = createWalletClient({ account, chain: arcTestnet, transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io") });
+    const amount = BigInt(bid.amountMinor);
+
+    // approve exact amount, then placeBid (two txs; documented).
+    const approveHash = await wallet.writeContract({
+      address: USDC_ARC,
+      abi: ESCROW_ABI,
+      functionName: "approve",
+      args: [config.escrowAddress, amount],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+    const hash = await wallet.writeContract({
+      address: config.escrowAddress,
+      abi: ESCROW_ABI,
+      functionName: "placeBid",
+      args: [BigInt(bid.lotId), BigInt(bid.amountMinor) as never, bid.seller as Address],
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    return { txHash: hash, fromBlock: receipt.blockNumber };
+  }
+
+  async function syncEvents(fromBlock?: bigint): Promise<{ events: ChainEvent[]; latestBlock: bigint }> {
+    const latest = await publicClient.getBlockNumber();
+    const from = fromBlock ?? latest - 500n; // bounded lookback for the demo
+    const logs = await publicClient.getLogs({
+      address: config.escrowAddress,
+      events: EVENT_ABI,
+      fromBlock: from < 0n ? 0n : from,
+      toBlock: latest,
+    });
+    const events: ChainEvent[] = [];
+    for (const log of logs) {
+      const key: EventKey = { blockNumber: log.blockNumber, logIndex: log.logIndex };
+      const a = log.args as Record<string, unknown>;
+      switch (log.eventName) {
+        case "BidPlaced":
+          events.push({ kind: "BidPlaced", lotId: a.lotId as bigint, bidder: a.bidder as string, amount: a.amount as bigint, prevBidder: a.prevBidder as string, prevAmount: a.prevAmount as bigint, seller: a.seller as string, key });
+          break;
+        case "RefundQueued":
+          events.push({ kind: "RefundQueued", bidder: a.bidder as string, amount: a.amount as bigint, key });
+          break;
+        case "RefundClaimed":
+          events.push({ kind: "RefundClaimed", bidder: a.bidder as string, amount: a.amount as bigint, key });
+          break;
+        case "LotSettled":
+          events.push({ kind: "LotSettled", lotId: a.lotId as bigint, bidder: a.bidder as string, amount: a.amount as bigint, seller: a.seller as string, key });
+          break;
+        case "EmergencyRefund":
+          events.push({ kind: "EmergencyRefund", lotId: a.lotId as bigint, bidder: a.bidder as string, amount: a.amount as bigint, key });
+          break;
+        case "AuctioneerChanged":
+          events.push({ kind: "AuctioneerChanged", oldAuctioneer: a.oldAuctioneer as string, newAuctioneer: a.newAuctioneer as string, key });
+          break;
+      }
+    }
+    return { events, latestBlock: latest };
+  }
+
+  return { syncEvents, submitPlaceBid };
+}
+
+/** Resolve a submitted tx to a receipt + its events (used by the resolver). */
+export function createTxResolver(config: { rpcUrl?: string }) {
+  const publicClient = createPublicClient({
+    chain: arcTestnet,
+    transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io", { timeout: 15_000 }),
+  });
+  return async (txHash: string): Promise<{ blockNumber: bigint; status: "success" | "reverted" }> => {
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as Hex });
+    return { blockNumber: receipt.blockNumber, status: receipt.status };
+  };
+}

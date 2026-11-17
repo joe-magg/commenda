@@ -16,7 +16,15 @@ export const arcTestnet = defineChain({
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: ["https://rpc.testnet.arc.io"] } },
   blockExplorers: { default: { name: "Arcscan", url: "https://explorer.testnet.arc.io" } },
+  // Arc has sub-second finality. Without this, viem assumes Ethereum's 12s
+  // blocks and polls receipts every 4s, adding up to 8s to a two-tx bid.
+  blockTime: 500,
 });
+
+const RPC = "https://rpc.testnet.arc.io";
+const rpc = (timeoutMs = 15_000) => http(RPC, { timeout: timeoutMs });
+/** Client-level interval — viem's default is 4s, far too slow for Arc. */
+const POLL_MS = 250;
 
 export const USDC_ARC = "0x3600000000000000000000000000000000000000" as const;
 
@@ -31,6 +39,7 @@ const EVENT_ABI = [
 
 const ESCROW_ABI = [
   parseAbiItem("function approve(address spender, uint256 amount) returns (bool)"),
+  parseAbiItem("function allowance(address owner, address spender) view returns (uint256)"),
   parseAbiItem("function placeBid(uint256 lotId, uint96 amount, address seller)"),
 ] as const;
 
@@ -38,6 +47,8 @@ export type ChainAdapterConfig = {
   escrowAddress: Address;
   /** Server-held agent wallets keyed by agentId (demo keys; testnet only). */
   agentKeys: Record<string, `0x${string}`>;
+  /** Per-agent USDC allowance to pre-approve to escrow (minor units). */
+  allowances?: Record<string, number>;
   rpcUrl?: string;
   timeoutMs?: number;
 };
@@ -46,26 +57,44 @@ export type ChainAdapterConfig = {
 export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
   const publicClient = createPublicClient({
     chain: arcTestnet,
-    transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io", { timeout: config.timeoutMs ?? 15_000 }),
+    transport: rpc(config.timeoutMs),
+    pollingInterval: POLL_MS,
   });
 
   const accounts = new Map<string, ReturnType<typeof privateKeyToAccount>>();
   for (const [id, key] of Object.entries(config.agentKeys)) accounts.set(id, privateKeyToAccount(key));
+  const approved = new Set<string>();
+  let lastBlock = 0n;
 
-  async function submitPlaceBid(bid: Bid, agentId: string): Promise<{ txHash: string; fromBlock: bigint }> {
-    const account = accounts.get(agentId);
-    if (!account) throw new Error(`no server wallet for agent ${agentId}`);
-    const wallet = createWalletClient({ account, chain: arcTestnet, transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io") });
-    const amount = BigInt(bid.amountMinor);
-
-    // approve exact amount, then placeBid (two txs; documented).
-    const approveHash = await wallet.writeContract({
+  /** One-time bounded approval per agent. Saves a whole tx + receipt wait per bid. */
+  async function ensureAllowance(agentId: string, account: ReturnType<typeof privateKeyToAccount>): Promise<void> {
+    if (approved.has(agentId)) return;
+    const wallet = createWalletClient({ account, chain: arcTestnet, transport: rpc(config.timeoutMs) });
+    const current = await publicClient.readContract({
       address: USDC_ARC,
       abi: ESCROW_ABI,
-      functionName: "approve",
-      args: [config.escrowAddress, amount],
+      functionName: "allowance",
+      args: [account.address, config.escrowAddress],
     });
-    await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    const desired = BigInt(config.allowances?.[agentId] ?? 0);
+    if (desired > 0n && BigInt(current) < desired) {
+      const hash = await wallet.writeContract({
+        address: USDC_ARC,
+        abi: ESCROW_ABI,
+        functionName: "approve",
+        args: [config.escrowAddress, desired],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
+    approved.add(agentId);
+  }
+
+  async function submitPlaceBid(bid: Bid, agentId: string): Promise<{ txHash: string; fromBlock: bigint }> {
+    const start = Date.now();
+    const account = accounts.get(agentId);
+    if (!account) throw new Error(`no server wallet for agent ${agentId}`);
+    const wallet = createWalletClient({ account, chain: arcTestnet, transport: rpc(config.timeoutMs) });
+    await ensureAllowance(agentId, account);
 
     const hash = await wallet.writeContract({
       address: config.escrowAddress,
@@ -73,12 +102,21 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
       functionName: "placeBid",
       args: [BigInt(bid.lotId), BigInt(bid.amountMinor) as never, bid.seller as Address],
     });
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    return { txHash: hash, fromBlock: receipt.blockNumber };
+    // Arc has instant finality and the resolver already waits for the receipt
+    // authoritatively. Don't spend another RPC round trip here — hand it a
+    // bounded lookback from the block we just synced in this same request.
+    const fromBlock = lastBlock > 2n ? lastBlock - 2n : 0n;
+    console.info("[commenda:chain] placeBid", JSON.stringify({
+      agent: agentId,
+      ms: Date.now() - start,
+      fromBlock: String(fromBlock),
+    }));
+    return { txHash: hash, fromBlock };
   }
 
   async function syncEvents(fromBlock?: bigint): Promise<{ events: ChainEvent[]; latestBlock: bigint }> {
     const latest = await publicClient.getBlockNumber();
+    lastBlock = latest;
     const from = fromBlock ?? latest - 500n; // bounded lookback for the demo
     const logs = await publicClient.getLogs({
       address: config.escrowAddress,
@@ -126,9 +164,9 @@ export async function settleOnChain(lotId: number): Promise<string> {
   const escrow = process.env.ESCROW_ADDRESS;
   if (!key || !escrow) throw new Error("missing settlement env");
   const account = privateKeyToAccount(key as `0x${string}`);
-  const transport = http("https://rpc.testnet.arc.io", { timeout: 15_000 });
+  const transport = rpc();
   const wallet = createWalletClient({ account, chain: arcTestnet, transport });
-  const publicClient = createPublicClient({ chain: arcTestnet, transport });
+  const publicClient = createPublicClient({ chain: arcTestnet, transport, pollingInterval: POLL_MS });
   const already = await publicClient.readContract({
     address: escrow as Address,
     abi: [parseAbiItem("function isSettled(uint256) view returns (bool)")],
@@ -150,7 +188,8 @@ export async function settleOnChain(lotId: number): Promise<string> {
 export function createTxResolver(config: { rpcUrl?: string }) {
   const publicClient = createPublicClient({
     chain: arcTestnet,
-    transport: http(config.rpcUrl ?? "https://rpc.testnet.arc.io", { timeout: 15_000 }),
+    transport: rpc(),
+    pollingInterval: POLL_MS,
   });
   return async (txHash: string): Promise<{ blockNumber: bigint; status: "success" | "reverted" }> => {
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as Hex });

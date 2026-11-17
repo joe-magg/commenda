@@ -53,11 +53,11 @@ export type EngineHooks = {
 
 export const TIMING = {
   introMs: 3500,
-  // Circle settlement takes ~5-12s per paid bid. Slots must be spaced far
-  // enough apart that the per-agent in-flight lock clears before the next one,
-  // otherwise bids arrive as 409 BUSY and the stream looks stalled.
-  biddingMs: 24000,
-  bidOffsetsMs: [1200, 9200, 17200],
+  // Server-side bid processing is now ~0.1-0.8s (250ms receipt polling, one-time
+  // allowance, no redundant receipt wait). The remaining ~3-4s is Circle's
+  // remote /verify + /settle. Space slots to that cadence so bids don't collide.
+  biddingMs: 15000,
+  bidOffsetsMs: [1200, 4800, 8400, 12000],
   countdownMs: 5000,
   soldMs: 3200,
 } as const;

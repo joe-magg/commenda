@@ -20,6 +20,7 @@ import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
 import { getRuntime } from "@/lib/auction/runtime";
+import { listAgents } from "@/lib/db/repo";
 
 const NETWORK = "eip155:5042002" as const;
 const ROUTE_KEY = "/api/bids";
@@ -48,15 +49,28 @@ function buildServer() {
     .registerExtension(paymentIdentifierResourceServerExtension);
 }
 
+// One adapter for the process: reuses the RPC client, the cached approval set
+// and the last synced block. Rebuilding it per bid cost ~1s in allowance reads.
+const chainG = globalThis as typeof globalThis & { __commendaChain?: ReturnType<typeof createChainAdapter> };
+function chain(): ReturnType<typeof createChainAdapter> {
+  if (!chainG.__commendaChain) {
+    chainG.__commendaChain = createChainAdapter({
+      escrowAddress: env("ESCROW_ADDRESS"),
+      agentKeys: runtime.keys,
+      // One-time allowance = the agent's configured budget, not a per-bid tx.
+      allowances: Object.fromEntries(
+        listAgents().map((a) => [a.id, a.policy.budgetMinor]),
+      ),
+    });
+  }
+  return chainG.__commendaChain;
+}
+
 const deps: HandlerDeps = {
   state,
   resolveAgentId: (payer) => payerToAgent.get(payer.toLowerCase()) ?? null,
   now: () => Date.now(),
-  getChain: () =>
-    createChainAdapter({
-      escrowAddress: env("ESCROW_ADDRESS"),
-      agentKeys: runtime.keys,
-    }),
+  getChain: chain,
 };
 
 /** Extract the authenticated payer from the x402 payment payload header. */
@@ -81,7 +95,9 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ status: "rejected", rule: "INVALID_BID" }, { status: 400 });
   }
+  const start = Date.now();
   const { code, body: dto } = await handleBid(body, payer, deps);
+  console.info("[commenda:bids] handled", JSON.stringify({ status: dto.status, ms: Date.now() - start }));
   return NextResponse.json(dto, { status: code });
 }
 

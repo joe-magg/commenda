@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { AuctionEvent, EngineSnapshot } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
+import { playSfx } from "@/lib/client/sfx";
 
 export type AgentView = {
   id: string;
@@ -107,6 +108,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           setBids((xs) => [{ key: nextKey(), label: e.label, amountMinor: e.amountMinor, txHash: e.txHash, at: Date.now() }, ...xs].slice(0, 10));
           setCommitted((c) => ({ ...c, [e.bidder]: e.amountMinor }));
           pushActivity("bid", `${e.label} bid ${formatMinor(e.amountMinor)} USDC`);
+          if (soundRef.current) playSfx("bid");
           break;
         case "reject": {
           const a = agents.find((x) => x.id === e.agentId);
@@ -116,11 +118,16 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         case "outbid":
           setCommitted((c) => ({ ...c, [e.previousBidder]: 0 }));
           pushActivity("outbid", `${e.label} refunded — outbid`);
+          if (soundRef.current) playSfx("outbid");
           break;
         case "sold":
           setSold({ amount: e.amountMinor, winner: e.winner });
           pushActivity("sold", `SOLD ${formatMinor(e.amountMinor)} USDC${e.winner ? ` to ${e.winner}` : ""}`);
+          if (soundRef.current) playSfx("sold");
           window.setTimeout(() => setSold(null), 2600);
+          break;
+        case "countdown":
+          if (soundRef.current) playSfx("countdown");
           break;
         case "caption": {
           const line: SpokenLine = { text: e.text, audioUrl: e.audioUrl };
@@ -236,9 +243,15 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               <div>
                 <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">Current bid</div>
                 <div className="tabular mt-1 flex flex-wrap items-baseline gap-3">
-                  <span className="text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-none tracking-[-0.06em]">
+                  <motion.span
+                    key={current}
+                    initial={{ opacity: 0.55, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.28, ease: "easeOut" }}
+                    className="text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-none tracking-[-0.06em]"
+                  >
                     {formatMinor(current)}
-                  </span>
+                  </motion.span>
                   <span className="text-xl text-muted">USDC</span>
                   {phase === "countdown" && (
                     <motion.span

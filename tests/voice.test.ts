@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderVoice, VOICE_LINE_IDS } from "../lib/voice/templates";
+import { renderVoice, speakAmount, VOICE_LINE_IDS } from "../lib/voice/templates";
 import { VoiceBudget, type AuthorizeInput } from "../lib/voice/budget";
 import { LOTS, formatMinor } from "../lib/auction/lots";
 
@@ -34,9 +34,20 @@ describe("voice templates — no free text reaches TTS", () => {
     expect(() => renderVoice("countdown", { s: 61 })).toThrow();
   });
 
-  it("formats minor units to major units when spoken", () => {
-    expect(renderVoice("bidCall", { amountMinor: 350_000 }).text).toContain("0.35");
-    expect(renderVoice("bidCall", { amountMinor: 350_000 }).text).not.toContain("350000");
+  it("never speaks the currency word", () => {
+    expect(renderVoice("bidCall", { amountMinor: 350_000 }).text).not.toContain("USDC");
+    expect(renderVoice("sold", { amountMinor: 600_000 }).text).not.toContain("USDC");
+  });
+
+  it("speaks cents under a dollar, bare number for whole dollars, 'X dollar(s) NN' otherwise", () => {
+    expect(speakAmount(100_000)).toBe("10 cents");
+    expect(speakAmount(350_000)).toBe("35 cents");
+    expect(speakAmount(990_000)).toBe("99 cents");
+    expect(speakAmount(999_999)).toBe("1"); // rounds to a whole dollar
+    expect(speakAmount(1_000_000)).toBe("1");
+    expect(speakAmount(2_000_000)).toBe("2");
+    expect(speakAmount(1_500_000)).toBe("1 dollar 50");
+    expect(speakAmount(2_350_000)).toBe("2 dollars 35");
     expect(formatMinor(600_000)).toBe("0.60");
   });
 });

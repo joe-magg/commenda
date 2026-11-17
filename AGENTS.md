@@ -23,6 +23,7 @@
 - `npm run typecheck && npm test` after any TS change; `npm run build` before a PR.
 - `uvx zizmor .github/workflows/` after any workflow change.
 - CI uses `npm ci --ignore-scripts`, `npm audit signatures`, `npm audit --audit-level=high`.
+- Start `npm run dev` only for a test pass; stop it as soon as testing is done. Never leave it running for the user.
 
 ## Boundaries
 - Before changing `.github/workflows/*`, the escrow contract, or the `decide()` rules module, run the read-only `auction-auditor` subagent.

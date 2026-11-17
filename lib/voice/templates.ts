@@ -17,9 +17,20 @@ export type RenderedVoice = { lineId: VoiceLineId; text: string; hashInput: stri
 
 const MAX_AMOUNT_MINOR = 100_000_000; // 100 USDC — far above any demo bid
 
-function amountToWords(minor: number): string {
-  const major = minor / 1_000_000;
-  return Number.isInteger(major) ? major.toFixed(0) : major.toFixed(2);
+/**
+ * Spoken amount — no currency word, since USDC is already on screen and the
+ * app is built on Arc. Rules:
+ *   < 1 USDC  -> "35 cents"
+ *   whole USDC -> "2"
+ *   x.50      -> "1 dollar 50"   (no trailing "cents")
+ */
+export function speakAmount(minor: number): string {
+  const cents = Math.round(minor / 10_000); // 1 USDC = 100 cents = 1,000,000 minor
+  if (cents < 100) return `${cents} cents`;
+  const dollars = Math.floor(cents / 100);
+  const remainder = cents % 100;
+  if (remainder === 0) return String(dollars);
+  return `${dollars} dollar${dollars === 1 ? "" : "s"} ${remainder}`;
 }
 
 /** Runtime validation of a numeric slot: safe integer within [min,max]. */
@@ -54,7 +65,7 @@ export function renderVoice(lineId: unknown, args: unknown): RenderedVoice {
     }
     case "bidCall": {
       const amount = slot(a, "amountMinor", 1, MAX_AMOUNT_MINOR);
-      text = `${amountToWords(amount)} USDC. Do I hear more?`;
+      text = `${speakAmount(amount)}. Do I hear more?`;
       break;
     }
     case "countdown": {
@@ -64,7 +75,7 @@ export function renderVoice(lineId: unknown, args: unknown): RenderedVoice {
     }
     case "sold": {
       const amount = slot(a, "amountMinor", 1, MAX_AMOUNT_MINOR);
-      text = `Sold. ${amountToWords(amount)} USDC.`;
+      text = `Sold. ${speakAmount(amount)}.`;
       break;
     }
     default:

@@ -68,7 +68,7 @@ function driver() {
 }
 
 /** Place one scripted bid. Returns null only if there is no active agent for the slot. */
-export async function placeScriptedBid(lot: Lot, slot: number): Promise<BidOutcome | null> {
+export async function placeScriptedBid(lot: Lot, slot: number, chainLotId: number): Promise<BidOutcome | null> {
   const step = PLAN[slot];
   if (!step) return null;
   const d = driver();
@@ -76,8 +76,8 @@ export async function placeScriptedBid(lot: Lot, slot: number): Promise<BidOutco
   if (!agent) return null;
 
   const bid = {
-    id: `${agent.id.slice(0, 10)}-${lot.chainId}-${step.amountMinor}`,
-    lotId: String(lot.chainId),
+    id: `${agent.id.slice(0, 10)}-${chainLotId}-${step.amountMinor}`,
+    lotId: String(chainLotId),
     amountMinor: step.amountMinor,
     category: lot.category,
     seller: lot.seller,
@@ -92,8 +92,8 @@ export async function placeScriptedBid(lot: Lot, slot: number): Promise<BidOutco
     const dto = (await res.json().catch(() => ({}))) as { status?: string; rule?: string; txHash?: string };
 
     if (res.ok && (dto.status === "placed" || dto.status === "pending")) {
-      const previousBidder = d.lastLeader.get(lot.chainId);
-      d.lastLeader.set(lot.chainId, agent.id);
+      const previousBidder = d.lastLeader.get(chainLotId);
+      d.lastLeader.set(chainLotId, agent.id);
       return {
         ok: true,
         amountMinor: step.amountMinor,

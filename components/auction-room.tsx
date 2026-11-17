@@ -13,8 +13,11 @@ export type AgentView = {
   perBidCapMinor: number;
   watchlist: string[];
   approvalEnabled: boolean;
+  approvalAboveMinor: number;
+  active: boolean;
 };
 
+type SpokenLine = { text: string; audioUrl?: string };
 type BidItem = { key: string; label: string; amountMinor: number; txHash?: string; at: number };
 type ActivityItem = { key: string; tone: "bid" | "reject" | "outbid" | "sold" | "voice"; text: string; at: number };
 
@@ -31,12 +34,54 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
   const [connected, setConnected] = useState(false);
   const [sold, setSold] = useState<{ amount: number; winner: string | null } | null>(null);
   const [committed, setCommitted] = useState<Record<string, number>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const queueRef = useRef<SpokenLine[]>([]);
   const soundRef = useRef(false);
-  useEffect(() => { soundRef.current = soundOn; }, [soundOn]);
 
   const pushActivity = useCallback((tone: ActivityItem["tone"], text: string) => {
     setActivity((xs) => [{ key: nextKey(), tone, text, at: Date.now() }, ...xs].slice(0, 18));
   }, []);
+
+  // One persistent audio element with a small queue. A new line lets the
+  // current one finish; if more than two pile up, the oldest pending line is
+  // dropped so audio never drifts far behind the live action.
+  const playNext = useCallback(() => {
+    const a = audioRef.current;
+    const next = queueRef.current.shift();
+    if (!a || !next?.audioUrl) return;
+    a.src = next.audioUrl;
+    a.currentTime = 0;
+    setCaption(next.text);
+    void a.play().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const a = new Audio();
+    a.preload = "auto";
+    a.volume = 0.9;
+    a.addEventListener("ended", playNext);
+    a.addEventListener("error", playNext);
+    audioRef.current = a;
+    return () => {
+      a.removeEventListener("ended", playNext);
+      a.removeEventListener("error", playNext);
+      a.pause();
+      queueRef.current = [];
+    };
+  }, [playNext]);
+
+  const toggleSound = () => {
+    const next = !soundRef.current;
+    soundRef.current = next;
+    setSoundOn(next);
+    if (!next && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute("src");
+      audioRef.current.load();
+      queueRef.current = [];
+    }
+  };
 
   useEffect(() => {
     const es = new EventSource("/api/stream");
@@ -55,6 +100,8 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           setCaption("");
           setSold(null);
           setCommitted({});
+          // Drop stale pending lines on a lot change; let the current line finish.
+          queueRef.current = [];
           break;
         case "bid":
           setBids((xs) => [{ key: nextKey(), label: e.label, amountMinor: e.amountMinor, txHash: e.txHash, at: Date.now() }, ...xs].slice(0, 10));
@@ -75,14 +122,29 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           pushActivity("sold", `SOLD ${formatMinor(e.amountMinor)} USDC${e.winner ? ` to ${e.winner}` : ""}`);
           window.setTimeout(() => setSold(null), 2600);
           break;
-        case "caption":
-          setCaption(e.text);
-          if (e.audioUrl && soundRef.current) {
-            const audio = new Audio(e.audioUrl);
-            audio.volume = 0.9;
-            void audio.play().catch(() => {});
+        case "caption": {
+          const line: SpokenLine = { text: e.text, audioUrl: e.audioUrl };
+          if (!soundRef.current || !e.audioUrl) {
+            setCaption(e.text);
+            break;
+          }
+          const a = audioRef.current;
+          if (!a) {
+            setCaption(e.text);
+            break;
+          }
+          if (a.paused) {
+            queueRef.current = [];
+            a.src = e.audioUrl;
+            a.currentTime = 0;
+            setCaption(e.text);
+            void a.play().catch(() => {});
+          } else {
+            queueRef.current.push(line);
+            if (queueRef.current.length > 2) queueRef.current.shift();
           }
           break;
+        }
         case "voice_warning":
           pushActivity("voice", `voice: ${e.reason.toLowerCase().replace(/_/g, " ")}`);
           break;
@@ -115,7 +177,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
             {connected ? "live" : "connecting"}
           </span>
           <button
-            onClick={() => setSoundOn((s) => !s)}
+            onClick={toggleSound}
             className="whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-muted"
           >
             {soundOn ? "Sound on" : "Enable sound"}
@@ -252,25 +314,45 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         {/* RIGHT RAIL */}
         <aside className="flex flex-col gap-5">
           <div className="card p-5">
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-[0.14em] text-muted">Delegated agents</h2>
-            <div className="flex flex-col gap-5">
+            <div className="mb-4 flex items-baseline justify-between gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted">Delegated agents</h2>
+              <span className="text-[11px] text-subtle">{agents.filter((a) => a.active).length} live · {agents.length} enrolled</span>
+            </div>
+            <div className="flex max-h-[460px] flex-col gap-2 overflow-y-auto pr-1">
               {agents.map((a) => {
                 const spent = committed[a.id] ?? 0;
                 const pct = Math.min(100, (spent / a.budgetMinor) * 100);
+                const open = expanded.has(a.id);
                 return (
-                  <div key={a.id}>
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-sm font-semibold text-ink">{a.label}</span>
-                      <span className="tabular text-xs text-muted">{formatMinor(a.budgetMinor)} USDC cap</span>
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-subtle">{a.short}</div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
+                  <div key={a.id} className="rounded-lg border border-line p-3">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => setExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(a.id)) next.delete(a.id);
+                        else next.add(a.id);
+                        return next;
+                      })}
+                      className="flex w-full items-start justify-between gap-2 text-left"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full ${a.active ? "bg-settled" : "bg-subtle"}`} />
+                          <span className="text-sm font-semibold text-ink">{a.label}</span>
+                          <span className="text-[10px] text-subtle">{a.active ? "bidding" : "standby"}</span>
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] text-subtle">{a.short}</div>
+                      </div>
+                      <span className="tabular shrink-0 text-xs text-muted">{formatMinor(a.budgetMinor)}</span>
+                    </button>
+                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-line">
                       <div
                         className="h-full rounded-full bg-ink transition-[width] duration-500"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <div className="tabular mt-1.5 flex justify-between text-[11px] text-muted">
+                    <div className="tabular mt-1 flex justify-between text-[10px] text-muted">
                       <span>{formatMinor(spent)} committed</span>
                       <span>per bid {formatMinor(a.perBidCapMinor)}</span>
                     </div>
@@ -279,6 +361,35 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                         <span key={w} className="rounded bg-bg px-1.5 py-0.5 text-[10px] text-muted">{w}</span>
                       ))}
                     </div>
+                    <AnimatePresence initial={false}>
+                      {open && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-line pt-3 text-[11px]">
+                            <div>
+                              <div className="text-subtle">Budget</div>
+                              <div className="tabular text-ink">{formatMinor(a.budgetMinor)} USDC</div>
+                            </div>
+                            <div>
+                              <div className="text-subtle">Per-bid cap</div>
+                              <div className="tabular text-ink">{formatMinor(a.perBidCapMinor)} USDC</div>
+                            </div>
+                            <div>
+                              <div className="text-subtle">Approval above</div>
+                              <div className="tabular text-ink">{a.approvalEnabled ? `${formatMinor(a.approvalAboveMinor)} USDC` : "autonomous"}</div>
+                            </div>
+                            <div>
+                              <div className="text-subtle">Status</div>
+                              <div className="text-ink">{a.active ? "Wallet active" : "No wallet — halted"}</div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 );
               })}

@@ -44,8 +44,8 @@ export type SpokenLine = { text: string; audioUrl?: string; warning?: string };
 
 export type EngineHooks = {
   onLotOpen?: (lot: Lot) => void;
-  onBidSlot?: (lot: Lot, slot: number) => Promise<BidOutcome | null>;
-  onSold?: (lot: Lot, amountMinor: number) => Promise<string | undefined>;
+  onBidSlot?: (lot: Lot, slot: number, chainLotId: number) => Promise<BidOutcome | null>;
+  onSold?: (lot: Lot, amountMinor: number, chainLotId: number) => Promise<string | undefined>;
   speak?: (lineId: string, args: Record<string, number>, lotIndex: number) => Promise<SpokenLine | undefined>;
 };
 
@@ -73,6 +73,8 @@ export class AuctionEngine {
   private hooks: EngineHooks = {};
   private generation = 0;
   private advancing = false;
+  private lotVisits = 0;
+  private currentChainLotId = 0;
 
   setHooks(hooks: EngineHooks): void {
     this.hooks = hooks;
@@ -149,6 +151,10 @@ export class AuctionEngine {
 
   private openLot(index: number): void {
     const lot = LOTS[index];
+    // Every visit gets a distinct on-chain lot id, so looping the same six
+    // lots never collides with decide()'s per-lot idempotency key.
+    this.currentChainLotId = lot.chainId + this.lotVisits * 1000;
+    this.lotVisits++;
     this.state = {
       ...this.state,
       phase: "intro",
@@ -181,7 +187,7 @@ export class AuctionEngine {
     if (!this.hooks.onBidSlot) return;
     let outcome: BidOutcome | null;
     try {
-      outcome = await this.hooks.onBidSlot(lot, slot);
+      outcome = await this.hooks.onBidSlot(lot, slot, this.currentChainLotId);
     } catch {
       return; // driver errors are surfaced by the driver itself; never kill the show
     }
@@ -239,7 +245,7 @@ export class AuctionEngine {
     const winner = this.state.leaderLabel;
     let txHash: string | undefined;
     if (amount > lot.openingMinor && this.hooks.onSold) {
-      try { txHash = await this.hooks.onSold(lot, amount); } catch { /* settle failure is surfaced in the log */ }
+      try { txHash = await this.hooks.onSold(lot, amount, this.currentChainLotId); } catch { /* settle failure is surfaced in the log */ }
     }
     this.emit({ type: "sold", lotId: lot.id, amountMinor: amount, winner, txHash });
     this.emit({ type: "snapshot", state: this.snapshot() });

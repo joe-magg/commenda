@@ -63,6 +63,22 @@ describe("auction engine state machine", () => {
     expect(events.some((e) => e.type === "sold")).toBe(true);
   });
 
+  it("gives each loop of a lot a fresh on-chain id", async () => {
+    const ids: number[] = [];
+    engine.setHooks({
+      onBidSlot: async (_lot, _slot, chainLotId) => { ids.push(chainLotId); return null; },
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    // Run out the lot, advance into the next cycle's first bid slot.
+    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    expect(ids.length).toBeGreaterThan(1);
+    // Slots within one visit share an id; a new loop must get a different one.
+    expect(new Set(ids).size).toBeGreaterThan(1);
+    expect(ids.at(-1)).not.toBe(ids[0]);
+  });
+
   it("emits captions with audio URLs from the voice hook", async () => {
     engine.setHooks({ speak: async () => ({ text: "Lot 1. Bidding is open.", audioUrl: "/api/audio/abc" }) });
     engine.start();

@@ -4,13 +4,8 @@
     "payer": "0x04d9fd5dc9da8c827daa0c110d6c1637f0a7c207",
     "budgetMinor": 5000000,
     "perBidCapMinor": 500000,
-    "watchlist": [
-      "electronics",
-      "collectibles"
-    ],
-    "sellerAllowlist": [
-      "0x3333333333333333333333333333333333333333"
-    ],
+    "watchlist": ["electronics", "collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
     "approvalEnabled": false,
     "approvalAboveMinor": 250000
   },
@@ -19,14 +14,69 @@
     "payer": "0x47e9fdd71b7e54e26079b98b15ed9a872af42991",
     "budgetMinor": 8000000,
     "perBidCapMinor": 1000000,
-    "watchlist": [
-      "art",
-      "collectibles"
-    ],
-    "sellerAllowlist": [
-      "0x3333333333333333333333333333333333333333"
-    ],
+    "watchlist": ["art", "collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
     "approvalEnabled": false,
     "approvalAboveMinor": 400000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000001",
+    "payer": "0x1000000000000000000000000000000000000001",
+    "budgetMinor": 3000000,
+    "perBidCapMinor": 300000,
+    "watchlist": ["electronics"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": false,
+    "approvalAboveMinor": 150000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000002",
+    "payer": "0x1000000000000000000000000000000000000002",
+    "budgetMinor": 4000000,
+    "perBidCapMinor": 400000,
+    "watchlist": ["art", "collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": true,
+    "approvalAboveMinor": 200000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000003",
+    "payer": "0x1000000000000000000000000000000000000003",
+    "budgetMinor": 6000000,
+    "perBidCapMinor": 750000,
+    "watchlist": ["collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": false,
+    "approvalAboveMinor": 400000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000004",
+    "payer": "0x1000000000000000000000000000000000000004",
+    "budgetMinor": 2500000,
+    "perBidCapMinor": 250000,
+    "watchlist": ["electronics", "art"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": true,
+    "approvalAboveMinor": 100000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000005",
+    "payer": "0x1000000000000000000000000000000000000005",
+    "budgetMinor": 7000000,
+    "perBidCapMinor": 900000,
+    "watchlist": ["art"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": false,
+    "approvalAboveMinor": 500000
+  },
+  {
+    "id": "0x1000000000000000000000000000000000000006",
+    "payer": "0x1000000000000000000000000000000000000006",
+    "budgetMinor": 5500000,
+    "perBidCapMinor": 600000,
+    "watchlist": ["collectibles", "electronics"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": true,
+    "approvalAboveMinor": 300000
   }
 ]

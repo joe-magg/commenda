@@ -20,9 +20,9 @@ export function ensureBootstrapped(): void {
   if (!g.__commendaResolver) g.__commendaResolver = startResolver();
   const engine = getEngine();
   engine.setHooks({
-    onBidSlot: (lot, slot) => placeScriptedBid(lot, slot),
+    onBidSlot: (lot, slot, chainLotId) => placeScriptedBid(lot, slot, chainLotId),
     speak: (lineId, args, lotIndex) => speak(lineId, args, lotIndex),
-    onSold: (lot) => settleOnChain(lot.chainId).catch(() => ""),
+    onSold: (_lot, _amount, chainLotId) => settleOnChain(chainLotId).catch(() => ""),
   });
   console.info("[commenda] engine bootstrapped; live agents:", activeAgents().map((a) => a.label).join(", ") || "(none)");
 }

@@ -36,6 +36,7 @@ describe("agent registry (SQLite)", () => {
         sellerAllowlist: ["0x3333333333333333333333333333333333333333"],
         approvalEnabled: false,
         approvalAboveMinor: 0,
+        maxWins: 1,
       },
     });
     expect(agent.label).toBe("Test Bidder");

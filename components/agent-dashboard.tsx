@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatMinor } from "@/lib/auction/lots";
+import { ItemArt } from "@/components/item-art";
+import { artSeedFor } from "@/lib/items/generator";
 
 type User = { id: string; name: string };
 type Policy = {
@@ -11,6 +13,7 @@ type Policy = {
   sellerAllowlist: string[];
   approvalEnabled: boolean;
   approvalAboveMinor: number;
+  maxWins: number;
 };
 type Agent = {
   id: string;
@@ -25,7 +28,7 @@ type Session = {
   id: string;
   name: string;
   status: string;
-  catalog: { id: number; title: string; category: string; openingMinor: number; sku: string }[];
+  catalog: { id: number; title: string; category: string; openingMinor: number; sku: string; artSeed: string }[];
 };
 type Claim = {
   id: string;
@@ -54,6 +57,7 @@ export function AgentDashboard() {
     watchlist: [] as string[],
     approvalEnabled: false,
     approvalAbove: "0.25",
+    maxWins: "1",
   });
 
   const refresh = useCallback(async () => {
@@ -92,10 +96,11 @@ export function AgentDashboard() {
         watchlist: form.watchlist,
         approvalEnabled: form.approvalEnabled,
         approvalAboveMinor,
+        maxWins: Math.max(1, Math.round(Number(form.maxWins) || 1)),
       }),
     }).then((r) => r.json());
     setNewKey(res.apiKey ?? null);
-    setForm({ label: "", budget: "5", perBid: "0.5", watchlist: [], approvalEnabled: false, approvalAbove: "0.25" });
+    setForm({ label: "", budget: "5", perBid: "0.5", watchlist: [], approvalEnabled: false, approvalAbove: "0.25", maxWins: "1" });
     setBusy(false);
     await refresh();
   };
@@ -172,6 +177,7 @@ export function AgentDashboard() {
                       <span>Budget {formatMinor(a.policy.budgetMinor)} USDC</span>
                       <span>Per bid {formatMinor(a.policy.perBidCapMinor)}</span>
                       <span>{a.policy.approvalEnabled ? `Approve > ${formatMinor(a.policy.approvalAboveMinor)}` : "Autonomous"}</span>
+                      <span>Stop after {a.policy.maxWins} win{a.policy.maxWins === 1 ? "" : "s"}</span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1">
                       {a.policy.watchlist.map((w) => <span key={w} className="rounded bg-bg px-1.5 py-0.5 text-[10px] text-muted">{w}</span>)}
@@ -220,6 +226,12 @@ export function AgentDashboard() {
                   onChange={(e) => setForm({ ...form, perBid: e.target.value })}
                   className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" />
               </label>
+              <label className="block text-xs text-muted">
+                Max items to buy
+                <input type="number" min="1" max="20" value={form.maxWins}
+                  onChange={(e) => setForm({ ...form, maxWins: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" />
+              </label>
               <label className="flex items-center gap-2 text-xs text-muted">
                 <input type="checkbox" checked={form.approvalEnabled}
                   onChange={(e) => setForm({ ...form, approvalEnabled: e.target.checked })}
@@ -262,9 +274,13 @@ export function AgentDashboard() {
                 </div>
                 <div className="mt-2 flex flex-col gap-1.5">
                   {s.catalog.map((l) => (
-                    <div key={l.id} className="flex justify-between text-[11px] text-muted">
-                      <span>{l.title}</span>
-                      <span className="tabular">{formatMinor(l.openingMinor)}</span>
+                    <div key={l.id} className="flex items-center gap-2">
+                      <ItemArt seed={l.artSeed || artSeedFor(l.sku)} size={30} className="shrink-0 rounded" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[11px] text-ink">{l.title}</div>
+                        <div className="truncate font-mono text-[9px] text-subtle">{l.sku}</div>
+                      </div>
+                      <span className="tabular text-[11px] text-muted">{formatMinor(l.openingMinor)}</span>
                     </div>
                   ))}
                 </div>
@@ -279,6 +295,9 @@ export function AgentDashboard() {
               <div className="flex flex-col gap-3">
                 {myClaims.map((c) => (
                   <div key={c.id} className="rounded-lg border border-line p-3">
+                    <div className="mb-2 flex justify-center">
+                      <ItemArt seed={artSeedFor(c.sku)} size={96} className="rounded-lg" />
+                    </div>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-sm font-semibold text-ink">{c.title}</span>
                       <span className="tabular text-xs text-muted">{formatMinor(c.amountMinor)}</span>

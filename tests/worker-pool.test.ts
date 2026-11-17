@@ -1,11 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { eligibleBidders, nextBidAmount, type BidderCapability } from "../lib/auction/worker-pool";
+import { canDeploy, eligibleBidders, nextBidAmount, type BidderCapability } from "../lib/auction/worker-pool";
 
 const cap = (perBidCapMinor: number, over: Partial<BidderCapability> = {}): BidderCapability => ({
   perBidCapMinor, bids: 0, left: false, ...over,
 });
 
 describe("worker pool selection", () => {
+  it("stops deploying once the max-items limit is reached", () => {
+    expect(canDeploy(0, 1)).toBe(true);
+    expect(canDeploy(1, 1)).toBe(false);
+    expect(canDeploy(2, 3)).toBe(true);
+    expect(canDeploy(3, 3)).toBe(false);
+  });
+
   it("derives increasing amounts from the opening bid", () => {
     expect(nextBidAmount(100_000, 0)).toBe(200_000);
     expect(nextBidAmount(100_000, 5)).toBe(700_000);

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { AuctionEvent, EngineSnapshot } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
+import { ItemArt } from "@/components/item-art";
 
 export type AgentView = {
   id: string;
@@ -244,11 +245,17 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                   className="stage-ring absolute inset-0 rounded-full"
                   style={{ background: `conic-gradient(from 0deg, ${displayLot?.accent ?? "#9aa6b2"}22, ${displayLot?.accent ?? "#9aa6b2"}bb, ${displayLot?.accent ?? "#9aa6b2"}22)` }}
                 />
-                <div className="absolute inset-3 rounded-full bg-surface" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-5xl font-semibold tracking-[-0.06em] text-ink/85">
-                    {displayLot ? String(displayLot.id + 1).padStart(2, "0") : "—"}
-                  </span>
+                <div className="absolute inset-3 flex items-center justify-center overflow-hidden rounded-full bg-surface">
+                  {displayLot?.artSeed ? (
+                    <ItemArt seed={displayLot.artSeed} size={176} className="h-full w-full" />
+                  ) : (
+                    <span className="text-5xl font-semibold tracking-[-0.06em] text-ink/85">
+                      {displayLot ? String(displayLot.id + 1).padStart(2, "0") : "—"}
+                    </span>
+                  )}
+                </div>
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-surface/90 px-2 py-0.5 text-[10px] font-medium text-muted">
+                  {displayLot ? `LOT ${String(displayLot.id + 1).padStart(2, "0")}` : "—"}
                 </div>
               </div>
 

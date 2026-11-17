@@ -19,7 +19,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const { ownerId, label, budgetMinor, perBidCapMinor, watchlist, approvalEnabled, approvalAboveMinor } = body;
+  const { ownerId, label, budgetMinor, perBidCapMinor, watchlist, approvalEnabled, approvalAboveMinor, maxWins } = body;
   if (typeof ownerId !== "string" || !ownerId) return Response.json({ error: "ownerId required" }, { status: 400 });
   if (typeof label !== "string" || label.trim().length < 1 || label.length > 40) {
     return Response.json({ error: "label must be 1-40 chars" }, { status: 400 });
@@ -33,6 +33,9 @@ export async function POST(req: Request): Promise<Response> {
   if (typeof approvalEnabled !== "boolean" || !Number.isSafeInteger(approvalAboveMinor) || (approvalAboveMinor as number) < 0) {
     return Response.json({ error: "invalid approval settings" }, { status: 400 });
   }
+  if (!Number.isSafeInteger(maxWins) || (maxWins as number) < 1 || (maxWins as number) > 20) {
+    return Response.json({ error: "maxWins must be 1-20" }, { status: 400 });
+  }
 
   const policy: Policy = {
     budgetMinor,
@@ -41,6 +44,7 @@ export async function POST(req: Request): Promise<Response> {
     sellerAllowlist: [DEMO_SELLER],
     approvalEnabled,
     approvalAboveMinor: approvalAboveMinor as number,
+    maxWins: maxWins as number,
   };
 
   const { agent, apiKey } = createAgent({

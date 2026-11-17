@@ -25,6 +25,7 @@ export type Lot = {
   openingMinor: number; // starting ask, in USDC minor units (6 decimals)
   accent: string; // CSS color used by the stage, from the neutral palette
   sku: string; // specific item identifier — a claim names a real thing
+  artSeed?: string; // SKU hash used to render deterministic SVG art
 };
 
 const CATALOG = [

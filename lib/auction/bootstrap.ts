@@ -7,7 +7,8 @@ import { getWorkerPool } from "./worker-pool";
 import { settleOnChain } from "./chain";
 import { startResolver } from "./resolver-runner";
 import { speak } from "@/lib/voice/synth";
-import { createClaim } from "@/lib/db/repo";
+import { createClaim, listSessions } from "@/lib/db/repo";
+import { itemsToLots, type GeneratedItem } from "@/lib/items/generator";
 
 const g = globalThis as typeof globalThis & {
   __commendaResolver?: () => void;
@@ -20,6 +21,10 @@ export function ensureBootstrapped(): void {
   if (!g.__commendaResolver) g.__commendaResolver = startResolver();
 
   const engine = getEngine();
+  const sessions = listSessions();
+  if (sessions[0]?.catalog.length) {
+    engine.setLots(itemsToLots(sessions[0].catalog as GeneratedItem[]));
+  }
   const pool = getWorkerPool();
   pool.setEmitter((e) => engine.emitExternal(e));
 

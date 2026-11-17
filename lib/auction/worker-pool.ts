@@ -5,7 +5,7 @@
  * capped, out of budget, or when the lot ends.
  */
 import { getPaidAgents, placeBid, type PaidAgent } from "./bidder";
-import { listAgents } from "@/lib/db/repo";
+import { listAgents, listClaims } from "@/lib/db/repo";
 import type { Lot } from "./lots";
 import type { AuctionEvent, BidOutcome } from "./engine";
 
@@ -15,12 +15,19 @@ const MAX_BIDS_PER_LOT = 6;
 type JoinedAgent = {
   agent: PaidAgent;
   perBidCapMinor: number;
+  maxWins: number;
+  wins: number;
   bids: number;
   left: boolean;
 };
 
 /** Pure selection logic, exported for table tests. */
 export type BidderCapability = { perBidCapMinor: number; bids: number; left: boolean };
+
+/** The "max items to buy per deploy" guardrail. */
+export function canDeploy(wins: number, maxWins: number): boolean {
+  return wins < maxWins;
+}
 
 export function nextBidAmount(openingMinor: number, slot: number): number {
   return openingMinor + (slot + 1) * INCREMENT_MINOR;
@@ -59,11 +66,24 @@ export class BidWorkerPool {
   onLotOpen(lot: Lot, chainLotId: number): void {
     const funded = new Map(getPaidAgents().map((a) => [a.id, a]));
     const policies = new Map(listAgents().map((a) => [a.id, a.policy]));
+    const claims = listClaims();
+    const winsFor = (id: string) => claims.filter((c) => c.winnerId === id).length;
     const joined: JoinedAgent[] = [];
     for (const [id, agent] of funded) {
       const policy = policies.get(id);
       if (!policy || !policy.watchlist.includes(lot.category)) continue;
-      joined.push({ agent, perBidCapMinor: policy.perBidCapMinor, bids: 0, left: false });
+      const wins = winsFor(id);
+      if (!canDeploy(wins, policy.maxWins)) {
+        this.emit({
+          type: "agent_leave", agentId: id, label: agent.label,
+          lotId: lot.id, reason: "max items reached",
+        });
+        continue;
+      }
+      joined.push({
+        agent, perBidCapMinor: policy.perBidCapMinor,
+        maxWins: policy.maxWins, wins, bids: 0, left: false,
+      });
       this.emit({ type: "agent_join", agentId: id, label: agent.label, lotId: lot.id });
     }
     this.lots.set(chainLotId, { displayId: lot.id, joined, currentBidder: null });

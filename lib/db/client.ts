@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import agentConfigRaw from "@/config/agents.json";
-import { LOTS } from "@/lib/auction/lots";
+import { generateCatalog } from "@/lib/items/generator";
 
 let db: DatabaseSync | undefined;
 let dbPath: string | undefined;
@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS agent_policies (
   watchlist TEXT NOT NULL,
   seller_allowlist TEXT NOT NULL,
   approval_enabled INTEGER NOT NULL,
-  approval_above_minor INTEGER NOT NULL
+  approval_above_minor INTEGER NOT NULL,
+  max_wins INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -82,7 +83,7 @@ function seed(d: DatabaseSync): void {
     "INSERT INTO agents (id, owner_id, label, wallet_address, enabled, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   const insertPolicy = d.prepare(
-    "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const owners = ["demo-you", "demo-you", "demo-maya", "demo-maya", "demo-theo", "demo-theo", "demo-you", "demo-maya"];
   agentConfigRaw.forEach((c, i) => {
@@ -98,16 +99,13 @@ function seed(d: DatabaseSync): void {
       JSON.stringify(c.sellerAllowlist),
       c.approvalEnabled ? 1 : 0,
       c.approvalAboveMinor,
+      1, // maxWins — stop after one item won
     );
   });
 
-  const catalog = LOTS.map((l) => ({
-    id: l.id,
-    title: l.title,
-    category: l.category,
-    openingMinor: l.openingMinor,
-    sku: l.sku,
-  }));
+  // Generate the fixed item block for the session up front — the Sotheby's
+  // model: bidders see the catalog before the session starts.
+  const catalog = generateCatalog("commenda-flash-001");
   d.prepare(
     "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, ?, ?, ?)",
   ).run("flash-001", "Thursday Flash Auction", now + 3_600_000, "scheduled", JSON.stringify(catalog), now);
@@ -120,6 +118,11 @@ export function getDb(): DatabaseSync {
   db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  // Idempotent migration for DBs created before max_wins existed.
+  const cols = db.prepare("PRAGMA table_info(agent_policies)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "max_wins")) {
+    db.exec("ALTER TABLE agent_policies ADD COLUMN max_wins INTEGER NOT NULL DEFAULT 1");
+  }
   seed(db);
   return db;
 }

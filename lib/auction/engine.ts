@@ -80,6 +80,14 @@ export class AuctionEngine {
   private advancing = false;
   private lotVisits = 0;
   private currentChainLotId = 0;
+  private lots: readonly Lot[] = LOTS;
+
+  /** Replace the catalog with generated session items before start(). */
+  setLots(lots: readonly Lot[]): void {
+    if (lots.length === 0) return;
+    this.lots = lots;
+    this.state = { ...this.state, totalLots: lots.length };
+  }
 
   setHooks(hooks: EngineHooks): void {
     this.hooks = hooks;
@@ -148,7 +156,7 @@ export class AuctionEngine {
     this.clearTimers();
     const lot = this.state.lot;
     const advance = () => {
-      const i = (this.state.lotIndex + 1) % LOTS.length;
+      const i = (this.state.lotIndex + 1) % this.lots.length;
       this.advancing = false;
       this.openLot(i);
     };
@@ -160,7 +168,7 @@ export class AuctionEngine {
   }
 
   private openLot(index: number): void {
-    const lot = LOTS[index];
+    const lot = this.lots[index];
     // Every visit gets a distinct on-chain lot id, so looping the same six
     // lots never collides with decide()'s per-lot idempotency key.
     this.currentChainLotId = lot.chainId + this.lotVisits * 1000;
@@ -175,7 +183,7 @@ export class AuctionEngine {
       countdown: 0,
     };
     this.emit({ type: "phase", phase: "intro" });
-    this.emit({ type: "lot_open", lot, index, total: LOTS.length });
+    this.emit({ type: "lot_open", lot, index, total: this.lots.length });
     this.emit({ type: "snapshot", state: this.snapshot() });
     this.hooks.onLotOpen?.(lot, this.currentChainLotId);
     this.say("lotIntro", { n: lot.id + 1 });
@@ -261,7 +269,7 @@ export class AuctionEngine {
     this.emit({ type: "snapshot", state: this.snapshot() });
     this.say("sold", { amountMinor: amount });
 
-    const advance = done ?? (() => this.openLot((this.state.lotIndex + 1) % LOTS.length));
+    const advance = done ?? (() => this.openLot((this.state.lotIndex + 1) % this.lots.length));
     this.later(advance, TIMING.soldMs);
   }
 }

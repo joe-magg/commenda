@@ -19,7 +19,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     return Response.json({ agent: setAgentEnabled(id, body.enabled) });
   }
 
-  const allowed = ["budgetMinor", "perBidCapMinor", "watchlist", "sellerAllowlist", "approvalEnabled", "approvalAboveMinor"];
+  const allowed = ["budgetMinor", "perBidCapMinor", "watchlist", "sellerAllowlist", "approvalEnabled", "approvalAboveMinor", "maxWins"];
   const patch: Partial<Policy> = {};
   for (const k of allowed) if (k in body) patch[k as keyof Policy] = body[k] as never;
   return Response.json({ agent: updatePolicy(id, patch) });

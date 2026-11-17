@@ -10,6 +10,7 @@ export type Policy = {
   sellerAllowlist: string[];
   approvalEnabled: boolean;
   approvalAboveMinor: number;
+  maxWins: number; // stop deploying after this many items won
 };
 export type Agent = {
   id: string;
@@ -26,7 +27,10 @@ export type Session = {
   name: string;
   startsAt: number;
   status: "scheduled" | "live" | "ended";
-  catalog: { id: number; title: string; category: string; openingMinor: number; sku: string }[];
+  catalog: {
+    id: number; title: string; sku: string; category: string;
+    condition: string; provenance: string; artSeed: string; openingMinor: number;
+  }[];
   createdAt: number;
 };
 export type Claim = {
@@ -45,12 +49,12 @@ type AgentRow = {
   id: string; owner_id: string; label: string; wallet_address: string | null;
   enabled: number; status: Agent["status"]; created_at: number;
   budget_minor: number; per_bid_cap_minor: number; watchlist: string;
-  seller_allowlist: string; approval_enabled: number; approval_above_minor: number;
+  seller_allowlist: string; approval_enabled: number; approval_above_minor: number; max_wins: number;
 };
 
 const AGENT_JOIN = `
   SELECT a.*, p.budget_minor, p.per_bid_cap_minor, p.watchlist, p.seller_allowlist,
-         p.approval_enabled, p.approval_above_minor
+         p.approval_enabled, p.approval_above_minor, p.max_wins
   FROM agents a JOIN agent_policies p ON p.agent_id = a.id
 `;
 
@@ -70,6 +74,7 @@ function toAgent(r: AgentRow): Agent {
       sellerAllowlist: JSON.parse(r.seller_allowlist) as string[],
       approvalEnabled: r.approval_enabled === 1,
       approvalAboveMinor: r.approval_above_minor,
+      maxWins: r.max_wins,
     },
   };
 }
@@ -174,7 +179,7 @@ export function createAgent(input: CreateAgentInput): { agent: Agent; apiKey: st
       "INSERT INTO agents (id, owner_id, label, wallet_address, api_key_hash, enabled, status, created_at) VALUES (?, ?, ?, ?, ?, 0, 'standby', ?)",
     ).run(id, input.ownerId, input.label, input.walletAddress, keyHash, now);
     db.prepare(
-      "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(
       id,
       input.policy.budgetMinor,
@@ -183,6 +188,7 @@ export function createAgent(input: CreateAgentInput): { agent: Agent; apiKey: st
       JSON.stringify(input.policy.sellerAllowlist),
       input.policy.approvalEnabled ? 1 : 0,
       input.policy.approvalAboveMinor,
+      input.policy.maxWins,
     );
     db.prepare("INSERT INTO audit_events (at, agent_id, kind, detail) VALUES (?, ?, ?, ?)").run(
       now,
@@ -219,7 +225,7 @@ export function updatePolicy(id: string, patch: Partial<Policy>): Agent | undefi
   if (!current) return undefined;
   const merged = { ...current.policy, ...patch };
   getDb().prepare(
-    "UPDATE agent_policies SET budget_minor=?, per_bid_cap_minor=?, watchlist=?, seller_allowlist=?, approval_enabled=?, approval_above_minor=? WHERE agent_id=?",
+    "UPDATE agent_policies SET budget_minor=?, per_bid_cap_minor=?, watchlist=?, seller_allowlist=?, approval_enabled=?, approval_above_minor=?, max_wins=? WHERE agent_id=?",
   ).run(
     merged.budgetMinor,
     merged.perBidCapMinor,
@@ -227,6 +233,7 @@ export function updatePolicy(id: string, patch: Partial<Policy>): Agent | undefi
     JSON.stringify(merged.sellerAllowlist),
     merged.approvalEnabled ? 1 : 0,
     merged.approvalAboveMinor,
+    merged.maxWins,
     id,
   );
   return getAgent(id);

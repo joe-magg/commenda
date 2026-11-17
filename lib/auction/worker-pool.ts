@@ -119,6 +119,10 @@ export class BidWorkerPool {
     return result;
   }
 
+  winnerFor(chainLotId: number): string | null {
+    return this.lots.get(chainLotId)?.currentBidder ?? null;
+  }
+
   /** Called on SOLD: remaining agents leave and the lot state is released. */
   onLotEnd(chainLotId: number): void {
     const state = this.lots.get(chainLotId);

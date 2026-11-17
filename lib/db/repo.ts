@@ -26,7 +26,18 @@ export type Session = {
   name: string;
   startsAt: number;
   status: "scheduled" | "live" | "ended";
-  catalog: { id: number; title: string; category: string; openingMinor: number }[];
+  catalog: { id: number; title: string; category: string; openingMinor: number; sku: string }[];
+  createdAt: number;
+};
+export type Claim = {
+  id: string;
+  chainLotId: string;
+  winnerId: string | null;
+  title: string;
+  sku: string;
+  amountMinor: number;
+  settleTx: string | null;
+  status: "issued" | "redeemed";
   createdAt: number;
 };
 
@@ -92,6 +103,54 @@ export function listSessions(): Session[] {
     catalog: JSON.parse(r.catalog) as Session["catalog"],
     createdAt: r.created_at,
   }));
+}
+
+/** Create a non-transferable redemption claim for a lot winner. */
+export function createClaim(input: {
+  chainLotId: number;
+  winnerId: string | null;
+  title: string;
+  sku: string;
+  amountMinor: number;
+  settleTx: string | null;
+}): Claim {
+  const db = getDb();
+  const id = `clm_${randomBytes(8).toString("hex")}`;
+  const now = Date.now();
+  db.prepare(
+    "INSERT INTO claims (id, chain_lot_id, winner_id, title, sku, amount_minor, settle_tx, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'issued', ?)",
+  ).run(id, String(input.chainLotId), input.winnerId, input.title, input.sku, input.amountMinor, input.settleTx, now);
+  return getClaim(id)!;
+}
+
+function getClaim(id: string): Claim | undefined {
+  const r = getDb().prepare("SELECT * FROM claims WHERE id = ?").get(id) as
+    { id: string; chain_lot_id: string; winner_id: string | null; title: string; sku: string; amount_minor: number; settle_tx: string | null; status: Claim["status"]; created_at: number } | undefined;
+  return r ? {
+    id: r.id, chainLotId: r.chain_lot_id, winnerId: r.winner_id, title: r.title,
+    sku: r.sku, amountMinor: r.amount_minor, settleTx: r.settle_tx, status: r.status, createdAt: r.created_at,
+  } : undefined;
+}
+
+export function listClaims(winnerId?: string): Claim[] {
+  const rows = (winnerId
+    ? getDb().prepare("SELECT * FROM claims WHERE winner_id = ? ORDER BY created_at DESC").all(winnerId)
+    : getDb().prepare("SELECT * FROM claims ORDER BY created_at DESC").all()) as
+    { id: string; chain_lot_id: string; winner_id: string | null; title: string; sku: string; amount_minor: number; settle_tx: string | null; status: Claim["status"]; created_at: number }[];
+  return rows.map((r) => ({
+    id: r.id, chainLotId: r.chain_lot_id, winnerId: r.winner_id, title: r.title,
+    sku: r.sku, amountMinor: r.amount_minor, settleTx: r.settle_tx, status: r.status, createdAt: r.created_at,
+  }));
+}
+
+export function redeemClaim(id: string): Claim | undefined {
+  const claim = getClaim(id);
+  if (!claim || claim.status === "redeemed") return claim;
+  getDb().prepare("UPDATE claims SET status = 'redeemed' WHERE id = ?").run(id);
+  getDb().prepare("INSERT INTO audit_events (at, agent_id, kind, detail) VALUES (?, ?, ?, ?)").run(
+    Date.now(), claim.winnerId, "claim_redeemed", claim.sku,
+  );
+  return getClaim(id);
 }
 
 export type CreateAgentInput = {

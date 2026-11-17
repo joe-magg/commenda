@@ -55,4 +55,20 @@ describe("agent registry (SQLite)", () => {
   it("writes an audit trail", () => {
     expect(repo.listAudit().some((e) => e.kind === "agent_created")).toBe(true);
   });
+
+  it("creates and redeems a non-transferable claim", () => {
+    const winner = repo.listAgents()[0].id;
+    const claim = repo.createClaim({
+      chainLotId: 12345,
+      winnerId: winner,
+      title: "Leica M6 Film Camera",
+      sku: "LEICA-M6-1847321",
+      amountMinor: 400_000,
+      settleTx: "0xabc",
+    });
+    expect(claim.status).toBe("issued");
+    expect(repo.listClaims(winner).some((c) => c.id === claim.id)).toBe(true);
+    expect(repo.redeemClaim(claim.id)?.status).toBe("redeemed");
+    expect(repo.listAudit().some((e) => e.kind === "claim_redeemed")).toBe(true);
+  });
 });

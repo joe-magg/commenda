@@ -7,6 +7,7 @@ import { getWorkerPool } from "./worker-pool";
 import { settleOnChain } from "./chain";
 import { startResolver } from "./resolver-runner";
 import { speak } from "@/lib/voice/synth";
+import { createClaim } from "@/lib/db/repo";
 
 const g = globalThis as typeof globalThis & {
   __commendaResolver?: () => void;
@@ -26,8 +27,19 @@ export function ensureBootstrapped(): void {
     onLotOpen: (lot, chainLotId) => pool.onLotOpen(lot, chainLotId),
     onBidSlot: (lot, slot, chainLotId) => pool.onBidSlot(lot, slot, chainLotId),
     speak: (lineId, args, lotIndex) => speak(lineId, args, lotIndex),
-    onSold: async (lot, _amount, chainLotId) => {
+    onSold: async (lot, amount, chainLotId) => {
+      const winner = pool.winnerFor(chainLotId);
       const tx = await settleOnChain(chainLotId).catch(() => "");
+      if (winner) {
+        createClaim({
+          chainLotId,
+          winnerId: winner,
+          title: lot.title,
+          sku: lot.sku,
+          amountMinor: amount,
+          settleTx: tx || null,
+        });
+      }
       pool.onLotEnd(chainLotId);
       return tx;
     },

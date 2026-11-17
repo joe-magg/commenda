@@ -24,15 +24,16 @@ export type Lot = {
   seller: string;
   openingMinor: number; // starting ask, in USDC minor units (6 decimals)
   accent: string; // CSS color used by the stage, from the neutral palette
+  sku: string; // specific item identifier — a claim names a real thing
 };
 
 const CATALOG = [
-  { title: "Vintage Film Camera", category: "electronics", accent: "#3f6fb5" },
-  { title: "Mid-Century Poster", category: "art", accent: "#8a6b4f" },
-  { title: "First-Edition Comic", category: "collectibles", accent: "#a8453f" },
-  { title: "Mechanical Keyboard", category: "electronics", accent: "#4a6b63" },
-  { title: "Oil Painting Study", category: "art", accent: "#6b5a8a" },
-  { title: "Vintage Coin Set", category: "collectibles", accent: "#8a7a3f" },
+  { title: "Leica M6 Film Camera", category: "electronics", accent: "#3f6fb5", sku: "LEICA-M6-1847321" },
+  { title: "Numbered Gallery Print", category: "art", accent: "#8a6b4f", sku: "GALLERY-12-047" },
+  { title: "First-Edition Comic", category: "collectibles", accent: "#a8453f", sku: "COMIC-A1-0912" },
+  { title: "Mechanical Keyboard", category: "electronics", accent: "#4a6b63", sku: "KEYB-87-2024" },
+  { title: "Oil Painting Study", category: "art", accent: "#6b5a8a", sku: "PAINT-STUDY-08" },
+  { title: "Vintage Coin Set", category: "collectibles", accent: "#8a7a3f", sku: "COINS-1964-G" },
 ] as const;
 
 export const LOTS: readonly Lot[] = CATALOG.map((c, id) => ({
@@ -43,6 +44,7 @@ export const LOTS: readonly Lot[] = CATALOG.map((c, id) => ({
   seller: DEMO_SELLER,
   openingMinor: 100_000,
   accent: c.accent,
+  sku: c.sku,
 }));
 
 /** Short, human-friendly label for a bidder address in the UI. */

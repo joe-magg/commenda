@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS sessions (
   catalog TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS claims (
+  id TEXT PRIMARY KEY,
+  chain_lot_id TEXT NOT NULL,
+  winner_id TEXT,
+  title TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  settle_tx TEXT,
+  status TEXT NOT NULL DEFAULT 'issued',
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
@@ -95,6 +106,7 @@ function seed(d: DatabaseSync): void {
     title: l.title,
     category: l.category,
     openingMinor: l.openingMinor,
+    sku: l.sku,
   }));
   d.prepare(
     "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, ?, ?, ?)",

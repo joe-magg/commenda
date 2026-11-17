@@ -25,7 +25,16 @@ type Session = {
   id: string;
   name: string;
   status: string;
-  catalog: { id: number; title: string; category: string; openingMinor: number }[];
+  catalog: { id: number; title: string; category: string; openingMinor: number; sku: string }[];
+};
+type Claim = {
+  id: string;
+  winnerId: string | null;
+  title: string;
+  sku: string;
+  amountMinor: number;
+  settleTx: string | null;
+  status: "issued" | "redeemed";
 };
 
 const CATEGORIES = ["electronics", "art", "collectibles"];
@@ -34,6 +43,7 @@ export function AgentDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [ownerId, setOwnerId] = useState<string>("");
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,12 +57,14 @@ export function AgentDashboard() {
   });
 
   const refresh = useCallback(async () => {
-    const [u, s] = await Promise.all([
+    const [u, s, c] = await Promise.all([
       fetch("/api/users").then((r) => r.json()),
       fetch("/api/sessions").then((r) => r.json()),
+      fetch("/api/claims").then((r) => r.json()),
     ]);
     setUsers(u.users);
     setSessions(s.sessions);
+    setClaims(c.claims);
     setOwnerId((cur) => cur || u.users[0]?.id || "");
     const a = await fetch(`/api/agents?owner=${encodeURIComponent(ownerId || u.users[0]?.id || "")}`).then((r) => r.json());
     setAgents(a.agents);
@@ -96,6 +108,14 @@ export function AgentDashboard() {
     });
     await refresh();
   };
+
+  const redeem = async (claim: Claim) => {
+    await fetch(`/api/claims/${claim.id}/redeem`, { method: "POST" });
+    await refresh();
+  };
+
+  const myAgentIds = new Set(agents.map((a) => a.id));
+  const myClaims = claims.filter((c) => c.winnerId && myAgentIds.has(c.winnerId));
 
   return (
     <main className="mx-auto min-h-screen max-w-[1180px] px-5 py-8 sm:px-8">
@@ -251,6 +271,49 @@ export function AgentDashboard() {
               </div>
             ))}
           </div>
+          <div className="card p-5">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">Your wins</h2>
+            {myClaims.length === 0 ? (
+              <p className="text-xs text-subtle">No wins yet. Claims appear here when an agent takes a lot.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {myClaims.map((c) => (
+                  <div key={c.id} className="rounded-lg border border-line p-3">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-semibold text-ink">{c.title}</span>
+                      <span className="tabular text-xs text-muted">{formatMinor(c.amountMinor)}</span>
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-subtle">SKU {c.sku}</div>
+                    <div className="mt-1 font-mono text-[10px] text-subtle">claim {c.id}</div>
+                    {c.settleTx && (
+                      <a
+                        href={`https://explorer.testnet.arc.io/tx/${c.settleTx}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 block font-mono text-[10px] text-muted underline underline-offset-2"
+                      >
+                        on-chain settlement ↗
+                      </a>
+                    )}
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className={`text-[10px] ${c.status === "redeemed" ? "text-settled" : "text-subtle"}`}>
+                        {c.status === "redeemed" ? "redeemed" : "right to redeem"}
+                      </span>
+                      {c.status === "issued" && (
+                        <button
+                          onClick={() => redeem(c)}
+                          className="rounded border border-line bg-surface px-2 py-1 text-[10px] font-medium text-ink hover:border-muted"
+                        >
+                          Redeem (simulated)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="card p-5 text-xs leading-relaxed text-muted">
             <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-muted">Demo scope</h2>
             Users, agents, policies and sessions are persisted in SQLite. New agents start with no wallet key,

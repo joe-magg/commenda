@@ -1,17 +1,19 @@
 @import "tailwindcss";
 
-/* Minimal neutral system. Single source of truth — components reference these
-   variables, never raw hex. Dark-on-light, restrained, smooth. */
+/* Single source of truth. Cool pale grey, deep ink, one signal red for live
+   state. Components reference these variables, never raw hex. */
 @theme inline {
-  --color-bg: #fafafa;
+  --color-bg: #f3f5f7;
   --color-surface: #ffffff;
-  --color-ink: #18181b;
-  --color-muted: #71717a;
-  --color-subtle: #a1a1aa;
-  --color-line: #e4e4e7;
-  --color-accent: #27272a;
-  --radius-card: 14px;
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --color-ink: #161b21;
+  --color-muted: #5d6773;
+  --color-subtle: #909aa6;
+  --color-line: #dfe4ea;
+  --color-accent: #161b21;
+  --color-live: #c8402c;
+  --color-settled: #1c6b58;
+  --radius-card: 12px;
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
 }
 
 html,
@@ -33,11 +35,28 @@ body {
   box-shadow: var(--shadow-soft);
 }
 
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* The stage: a quiet spotlight + slow rotating ring. One motion moment. */
+@keyframes stage-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.stage-ring { animation: stage-spin 24s linear infinite; }
+.live-dot { animation: live-pulse 1.8s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

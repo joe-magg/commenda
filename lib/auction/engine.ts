@@ -1,0 +1,257 @@
+/**
+ * Single-process auction state machine for the demo.
+ *
+ * One instance lives on globalThis so Next.js dev hot reloads cannot fork the
+ * show (same pattern as the bid route). Timers are chained setTimeout calls,
+ * not a long-running interval, so a manual Next can cancel everything cleanly.
+ *
+ * The engine owns NO money logic. It emits events and calls injected hooks;
+ * the bidder/voice/settlement modules are wired in `bootstrap.ts`. This keeps
+ * the state machine unit-testable and free of RPC/API imports.
+ */
+import { LOTS, type Lot, bidderLabel } from "./lots";
+
+export type Phase = "idle" | "intro" | "bidding" | "countdown" | "sold";
+
+export type EngineSnapshot = {
+  started: boolean;
+  phase: Phase;
+  lotIndex: number;
+  totalLots: number;
+  lot: Lot | null;
+  currentBidMinor: number;
+  leaderLabel: string | null;
+  countdown: number;
+};
+
+export type AuctionEvent =
+  | { type: "snapshot"; state: EngineSnapshot }
+  | { type: "phase"; phase: Phase }
+  | { type: "lot_open"; lot: Lot; index: number; total: number }
+  | { type: "bid"; lotId: number; amountMinor: number; bidder: string; label: string; txHash: string }
+  | { type: "reject"; lotId: number; agentId: string; rule: string; amountMinor: number }
+  | { type: "outbid"; lotId: number; previousBidder: string; amountMinor: number; label: string }
+  | { type: "countdown"; seconds: number }
+  | { type: "sold"; lotId: number; amountMinor: number; winner: string | null; txHash?: string }
+  | { type: "caption"; text: string; lineId: string; audioUrl?: string }
+  | { type: "voice_warning"; reason: string };
+
+export type BidOutcome =
+  | { ok: true; amountMinor: number; bidder: string; txHash: string; previousBidder?: string }
+  | { ok: false; agentId: string; rule: string; amountMinor: number };
+
+export type SpokenLine = { text: string; audioUrl?: string; warning?: string };
+
+export type EngineHooks = {
+  onLotOpen?: (lot: Lot) => void;
+  onBidSlot?: (lot: Lot, slot: number) => Promise<BidOutcome | null>;
+  onSold?: (lot: Lot, amountMinor: number) => Promise<string | undefined>;
+  speak?: (lineId: string, args: Record<string, number>, lotIndex: number) => Promise<SpokenLine | undefined>;
+};
+
+export const TIMING = {
+  introMs: 3500,
+  biddingMs: 14000,
+  bidOffsetsMs: [1200, 3400, 5600, 7800, 10000, 12200],
+  countdownMs: 5000,
+  soldMs: 3200,
+} as const;
+
+export class AuctionEngine {
+  private state: EngineSnapshot = {
+    started: false,
+    phase: "idle",
+    lotIndex: 0,
+    totalLots: LOTS.length,
+    lot: null,
+    currentBidMinor: 0,
+    leaderLabel: null,
+    countdown: 0,
+  };
+  private listeners = new Set<(e: AuctionEvent) => void>();
+  private timers = new Set<ReturnType<typeof setTimeout>>();
+  private hooks: EngineHooks = {};
+  private generation = 0;
+  private advancing = false;
+
+  setHooks(hooks: EngineHooks): void {
+    this.hooks = hooks;
+  }
+
+  subscribe(fn: (e: AuctionEvent) => void): () => void {
+    this.listeners.add(fn);
+    fn({ type: "snapshot", state: this.snapshot() });
+    return () => this.listeners.delete(fn);
+  }
+
+  snapshot(): EngineSnapshot {
+    return { ...this.state };
+  }
+
+  private emit(e: AuctionEvent): void {
+    for (const fn of this.listeners) {
+      try { fn(e); } catch { /* one slow/broken client cannot stall the show */ }
+    }
+  }
+
+  /** Fire-and-forget voice; captions/audio URLs arrive as events when ready. */
+  private say(lineId: string, args: Record<string, number>): void {
+    if (!this.hooks.speak) return;
+    void this.hooks.speak(lineId, args, this.state.lotIndex)
+      .then((r) => {
+        if (!r) return;
+        if (r.text) this.emit({ type: "caption", text: r.text, lineId, audioUrl: r.audioUrl });
+        if (r.warning) this.emit({ type: "voice_warning", reason: r.warning });
+      })
+      .catch(() => { /* voice failures never stall the show */ });
+  }
+
+  private later(fn: () => void, ms: number): void {
+    const gen = this.generation;
+    const t = setTimeout(() => {
+      this.timers.delete(t);
+      if (gen !== this.generation) return; // cancelled by Next()
+      fn();
+    }, ms);
+    this.timers.add(t);
+  }
+
+  private clearTimers(): void {
+    for (const t of this.timers) clearTimeout(t);
+    this.timers.clear();
+    this.generation++;
+  }
+
+  start(): void {
+    if (this.state.started) return;
+    this.state.started = true;
+    this.openLot(0);
+  }
+
+  /** Manual override: settle the current lot (if any) and jump to the next. */
+  next(): void {
+    if (!this.state.started) { this.start(); return; }
+    if (this.advancing) return;
+    this.advancing = true;
+    this.clearTimers();
+    const lot = this.state.lot;
+    const advance = () => {
+      const i = (this.state.lotIndex + 1) % LOTS.length;
+      this.advancing = false;
+      this.openLot(i);
+    };
+    if (lot && this.state.phase !== "sold" && this.state.currentBidMinor > lot.openingMinor) {
+      void this.finishLot(lot, advance);
+    } else {
+      advance();
+    }
+  }
+
+  private openLot(index: number): void {
+    const lot = LOTS[index];
+    this.state = {
+      ...this.state,
+      phase: "intro",
+      lotIndex: index,
+      lot,
+      currentBidMinor: lot.openingMinor,
+      leaderLabel: null,
+      countdown: 0,
+    };
+    this.emit({ type: "phase", phase: "intro" });
+    this.emit({ type: "lot_open", lot, index, total: LOTS.length });
+    this.emit({ type: "snapshot", state: this.snapshot() });
+    this.hooks.onLotOpen?.(lot);
+    this.say("lotIntro", { n: lot.id + 1 });
+    this.later(() => this.beginBidding(lot), TIMING.introMs);
+  }
+
+  private beginBidding(lot: Lot): void {
+    this.state = { ...this.state, phase: "bidding" };
+    this.emit({ type: "phase", phase: "bidding" });
+    this.emit({ type: "snapshot", state: this.snapshot() });
+
+    for (let i = 0; i < TIMING.bidOffsetsMs.length; i++) {
+      this.later(() => { void this.runBidSlot(lot, i); }, TIMING.bidOffsetsMs[i]);
+    }
+    this.later(() => this.beginCountdown(lot), TIMING.biddingMs);
+  }
+
+  private async runBidSlot(lot: Lot, slot: number): Promise<void> {
+    if (!this.hooks.onBidSlot) return;
+    let outcome: BidOutcome | null;
+    try {
+      outcome = await this.hooks.onBidSlot(lot, slot);
+    } catch {
+      return; // driver errors are surfaced by the driver itself; never kill the show
+    }
+    if (!outcome) return;
+    if (!outcome.ok) {
+      this.emit({ type: "reject", lotId: lot.id, agentId: outcome.agentId, rule: outcome.rule, amountMinor: outcome.amountMinor });
+      return;
+    }
+    if (outcome.previousBidder) {
+      this.emit({
+        type: "outbid",
+        lotId: lot.id,
+        previousBidder: outcome.previousBidder,
+        amountMinor: outcome.amountMinor,
+        label: bidderLabel(outcome.previousBidder),
+      });
+    }
+    this.state = {
+      ...this.state,
+      currentBidMinor: outcome.amountMinor,
+      leaderLabel: bidderLabel(outcome.bidder),
+    };
+    this.emit({
+      type: "bid",
+      lotId: lot.id,
+      amountMinor: outcome.amountMinor,
+      bidder: outcome.bidder,
+      label: bidderLabel(outcome.bidder),
+      txHash: outcome.txHash,
+    });
+    this.emit({ type: "snapshot", state: this.snapshot() });
+    this.say("bidCall", { amountMinor: outcome.amountMinor });
+  }
+
+  private beginCountdown(lot: Lot): void {
+    this.state = { ...this.state, phase: "countdown", countdown: 5 };
+    this.emit({ type: "phase", phase: "countdown" });
+    this.say("countdown", { s: 5 });
+    for (let s = 5; s >= 1; s--) {
+      this.later(() => {
+        this.state = { ...this.state, countdown: s };
+        this.emit({ type: "countdown", seconds: s });
+        this.emit({ type: "snapshot", state: this.snapshot() });
+      }, (5 - s) * 1000);
+    }
+    this.later(() => { void this.finishLot(lot); }, TIMING.countdownMs);
+  }
+
+  private async finishLot(lot: Lot, done?: () => void): Promise<void> {
+    if (this.state.phase === "sold") { done?.(); return; }
+    this.state = { ...this.state, phase: "sold", countdown: 0 };
+    this.emit({ type: "phase", phase: "sold" });
+
+    const amount = this.state.currentBidMinor;
+    const winner = this.state.leaderLabel;
+    let txHash: string | undefined;
+    if (amount > lot.openingMinor && this.hooks.onSold) {
+      try { txHash = await this.hooks.onSold(lot, amount); } catch { /* settle failure is surfaced in the log */ }
+    }
+    this.emit({ type: "sold", lotId: lot.id, amountMinor: amount, winner, txHash });
+    this.emit({ type: "snapshot", state: this.snapshot() });
+    this.say("sold", { amountMinor: amount });
+
+    const advance = done ?? (() => this.openLot((this.state.lotIndex + 1) % LOTS.length));
+    this.later(advance, TIMING.soldMs);
+  }
+}
+
+const g = globalThis as typeof globalThis & { __commendaEngine?: AuctionEngine };
+export function getEngine(): AuctionEngine {
+  if (!g.__commendaEngine) g.__commendaEngine = new AuctionEngine();
+  return g.__commendaEngine;
+}

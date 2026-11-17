@@ -13,30 +13,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { withX402, x402ResourceServer } from "@x402/next";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
-import { AuctionState } from "@/lib/auction/state";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
-import { parseAgentConfig, seedState, derivePayerMap, deriveAgentKeys } from "@/lib/auction/seed";
-import agentConfigRaw from "@/config/agents.json";
+import { getRuntime } from "@/lib/auction/runtime";
 
 const NETWORK = "eip155:5042002" as const;
 const ROUTE_KEY = "/api/bids";
 
-// Survive Next.js dev hot reload: one state + one seed via globalThis (auditor F1).
-const configs = parseAgentConfig(agentConfigRaw);
-const g = globalThis as typeof globalThis & { __commenda?: { state: AuctionState; payer: Map<string, string>; keys: Record<string, `0x${string}`> } };
-if (!g.__commenda) {
-  const state = new AuctionState();
-  const envKeys = JSON.parse(process.env.AGENT_KEYS ?? "{}");
-  const summary = seedState(state, configs, envKeys);
-  console.info("[commenda] seeded agents:", summary.seeded.length, "kill-switched:", summary.killSwitched.length);
-  g.__commenda = { state, payer: derivePayerMap(configs), keys: deriveAgentKeys(configs, envKeys) };
-}
-const state = g.__commenda.state;
-const payerToAgent = g.__commenda.payer;
-
-// Seed agent mandates from trusted config (NOT from the LLM or request body).
-// In the demo these are set by an admin endpoint / seed script; see README.
+// One shared runtime for the bid route, the engine and the resolver.
+const runtime = getRuntime();
+const state = runtime.state;
+const payerToAgent = runtime.payer;
 
 function env(name: string): `0x${string}` {
   const v = process.env[name];
@@ -60,7 +47,7 @@ const deps: HandlerDeps = {
   getChain: () =>
     createChainAdapter({
       escrowAddress: env("ESCROW_ADDRESS"),
-      agentKeys: g.__commenda!.keys,
+      agentKeys: runtime.keys,
     }),
 };
 

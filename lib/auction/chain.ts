@@ -117,6 +117,35 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
   return { syncEvents, submitPlaceBid };
 }
 
+/**
+ * Settle a lot as the auctioneer (server-held fee-seller key). Used once per
+ * lot on SOLD. Reverts are caught by the engine hook and surfaced as a warning.
+ */
+export async function settleOnChain(lotId: number): Promise<string> {
+  const key = process.env.FEE_SELLER_PRIVATE_KEY;
+  const escrow = process.env.ESCROW_ADDRESS;
+  if (!key || !escrow) throw new Error("missing settlement env");
+  const account = privateKeyToAccount(key as `0x${string}`);
+  const transport = http("https://rpc.testnet.arc.io", { timeout: 15_000 });
+  const wallet = createWalletClient({ account, chain: arcTestnet, transport });
+  const publicClient = createPublicClient({ chain: arcTestnet, transport });
+  const already = await publicClient.readContract({
+    address: escrow as Address,
+    abi: [parseAbiItem("function isSettled(uint256) view returns (bool)")],
+    functionName: "isSettled",
+    args: [BigInt(lotId)],
+  });
+  if (already) return "";
+  const hash = await wallet.writeContract({
+    address: escrow as Address,
+    abi: [parseAbiItem("function settle(uint256)")],
+    functionName: "settle",
+    args: [BigInt(lotId)],
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
 /** Resolve a submitted tx to a receipt + its events (used by the resolver). */
 export function createTxResolver(config: { rpcUrl?: string }) {
   const publicClient = createPublicClient({

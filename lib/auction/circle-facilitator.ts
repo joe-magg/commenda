@@ -43,7 +43,7 @@ const SELLER_TYPES = {
   ],
 } as const;
 
-type ProofPurpose = "verify" | "settle" | "status" | "supported";
+type ProofPurpose = "verify" | "settle" | "status";
 
 export type CircleFacilitatorConfig = {
   sellerPrivateKey: `0x${string}`;
@@ -160,15 +160,45 @@ export class CircleFacilitator implements FacilitatorClient {
   }
 
   async getSupported(): Promise<SupportedResponse> {
-    // Circle's /supported (keyless exact trial) — send a minimal signed body.
-    const body = JSON.stringify({ x402Version: 2 });
-    const data = (await this.post("supported", body)) as Record<string, unknown>;
+    // Circle's /supported is a plain GET (no seller proof). The x402 server
+    // calls this at init; a 404 here used to blow up every /api/bids request.
+    const base = this.config.baseUrl ?? CIRCLE_BASE;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 15_000);
+    try {
+      const res = await fetch(`${base}/supported`, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = (await res.json()) as Record<string, unknown>;
+        const kinds = Array.isArray(data.kinds) ? (data.kinds as SupportedResponse["kinds"]) : [];
+        const exact = kinds.find((k) => k.scheme === "exact" && k.network === (this.config.network ?? NETWORK));
+        if (exact) {
+          return {
+            kinds: [exact],
+            extensions: Array.isArray(data.extensions) ? (data.extensions as string[]) : [],
+            signers: data.signers && typeof data.signers === "object" ? (data.signers as Record<string, string[]>) : {},
+          };
+        }
+      }
+      console.warn(`[commenda] Circle /supported ${res.status}; using static exact/Arc kind`);
+    } catch (e) {
+      console.warn("[commenda] Circle /supported unreachable; using static exact/Arc kind", e instanceof Error ? e.message : e);
+    } finally {
+      clearTimeout(timer);
+    }
+    // Static fallback: Circle's documented exact kind on Arc testnet.
     return {
-      kinds: Array.isArray(data.kinds)
-        ? (data.kinds as SupportedResponse["kinds"])
-        : [{ x402Version: 2, scheme: "exact", network: (this.config.network ?? NETWORK) as SupportedResponse["kinds"][number]["network"], extra: { asset: USDC } }],
-      extensions: Array.isArray(data.extensions) ? (data.extensions as string[]) : [],
-      signers: data.signers && typeof data.signers === "object" ? (data.signers as Record<string, string[]>) : {},
+      kinds: [{
+        x402Version: 2,
+        scheme: "exact",
+        network: (this.config.network ?? NETWORK) as SupportedResponse["kinds"][number]["network"],
+        extra: { name: "USDC", version: "2", asset: USDC, decimals: 6 },
+      }],
+      extensions: [],
+      signers: {},
     };
   }
 }

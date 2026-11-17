@@ -1,0 +1,73 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { AuctionEngine, TIMING, type AuctionEvent } from "../lib/auction/engine";
+
+describe("auction engine state machine", () => {
+  let engine: AuctionEngine;
+  let events: AuctionEvent[];
+  let unsub: () => void;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    engine = new AuctionEngine();
+    events = [];
+    unsub = engine.subscribe((e) => events.push(e));
+  });
+
+  afterEach(() => {
+    unsub();
+    vi.useRealTimers();
+  });
+
+  it("opens a lot in intro, then moves to bidding", async () => {
+    engine.start();
+    expect(engine.snapshot().phase).toBe("intro");
+    expect(events.some((e) => e.type === "lot_open")).toBe(true);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs);
+    expect(engine.snapshot().phase).toBe("bidding");
+  });
+
+  it("applies a successful bid to the current amount", async () => {
+    engine.setHooks({
+      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    expect(engine.snapshot().currentBidMinor).toBe(200_000);
+    expect(engine.snapshot().leaderLabel).toBeTruthy();
+    expect(events.some((e) => e.type === "bid")).toBe(true);
+  });
+
+  it("surfaces guardrail rejections without changing the bid", async () => {
+    engine.setHooks({
+      onBidSlot: async () => ({ ok: false, agentId: "0xabc", rule: "WATCHLIST", amountMinor: 200_000 }),
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    expect(engine.snapshot().currentBidMinor).toBe(100_000);
+    expect(events.some((e) => e.type === "reject")).toBe(true);
+  });
+
+  it("settles and advances on manual Next", async () => {
+    const settle = vi.fn(async () => "0xsettle");
+    engine.setHooks({
+      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
+      onSold: settle,
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    engine.next();
+    // Bounded advance — the engine intentionally loops forever, so never runAllTimers.
+    await vi.advanceTimersByTimeAsync(TIMING.soldMs + 500);
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(engine.snapshot().lotIndex).toBe(1);
+    expect(events.some((e) => e.type === "sold")).toBe(true);
+  });
+
+  it("emits captions with audio URLs from the voice hook", async () => {
+    engine.setHooks({ speak: async () => ({ text: "Lot 1. Bidding is open.", audioUrl: "/api/audio/abc" }) });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const cap = events.find((e) => e.type === "caption");
+    expect(cap).toMatchObject({ text: "Lot 1. Bidding is open.", audioUrl: "/api/audio/abc" });
+  });
+});

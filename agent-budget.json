@@ -1,0 +1,13 @@
+{
+  "_comment": "Voice guardrails. 'Credits' here are billed-character equivalents (ElevenLabs free tier = 10,000 chars). No secrets.",
+  "maxCreditsPerSession": 6000,
+  "billedCharsPerRawChar": 3,
+  "maxGenerationsPerLot": 12,
+  "maxRequestsPerMinute": 20,
+  "maxConsecutiveFailures": 3,
+  "maxCharsPerRequest": 200,
+  "killSwitch": false,
+  "model": "eleven_flash_v2_5",
+  "outputFormat": "mp3_44100_128",
+  "applyTextNormalization": true
+}

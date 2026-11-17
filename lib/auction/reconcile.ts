@@ -87,7 +87,10 @@ export function reconcile(
           if (amt !== null) {
             const key = resolveAddress(ev.prevBidder.toLowerCase());
             const m = out.get(key);
-            if (m) out.set(key, { ...m, spentMinor: m.spentMinor - amt });
+            // Clamp at zero: an in-memory cursor starts empty on restart, so
+            // replaying historical events must never drive committed funds
+            // negative (decide() rejects negative spentMinor as INVALID_AMOUNT).
+            if (m) out.set(key, { ...m, spentMinor: Math.max(0, m.spentMinor - amt) });
             else warnings.push(`BidPlaced prevBidder ${ev.prevBidder} unknown; credit skipped`);
           }
         }
@@ -98,7 +101,7 @@ export function reconcile(
         if (amt !== null) {
           const key = resolveAddress(ev.bidder.toLowerCase());
           const m = out.get(key);
-          if (m) out.set(key, { ...m, spentMinor: m.spentMinor - amt });
+          if (m) out.set(key, { ...m, spentMinor: Math.max(0, m.spentMinor - amt) });
           else warnings.push(`EmergencyRefund bidder ${ev.bidder} unknown; credit skipped`);
         }
         break;

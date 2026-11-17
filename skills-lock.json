@@ -1,0 +1,53 @@
+{
+  "version": 2,
+  "skills": {
+    "agents": {
+      "source": "elevenlabs/skills",
+      "ref": "64271c12b46efb7c9a0b65c8ec521683bb35fc4a",
+      "commit": "64271c12b46efb7c9a0b65c8ec521683bb35fc4a",
+      "sourceType": "github",
+      "skillPath": "agents/SKILL.md",
+      "computedHash": "fa7bb9f0f6b6de59d8d391565bc0b99eb13627b63d719b1b6331ee6878b66e6b"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "ref": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "83485963700bcf11d5bf78118facb301676b69d918fee2e45a95e7f1a2840f6c"
+    },
+    "solana-dev": {
+      "source": "solana-foundation/solana-dev-skill",
+      "ref": "c9da2624cc6baca5c8c2123ea50d92ef19f1c917",
+      "commit": "c9da2624cc6baca5c8c2123ea50d92ef19f1c917",
+      "sourceType": "github",
+      "skillPath": "skills/solana-dev/SKILL.md",
+      "computedHash": "0f3eb0a58a81d12e9848dd805f1eaffa2783d14db9430aee571598e4b693fff9"
+    },
+    "use-arc": {
+      "source": "circlefin/skills",
+      "ref": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "commit": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "sourceType": "github",
+      "skillPath": "plugins/circle/skills/use-arc/SKILL.md",
+      "computedHash": "93d05065a20b868c8dd47dc6207a92c0d60de19dec4e205d237d7144640c8b40"
+    },
+    "use-circle-wallets": {
+      "source": "circlefin/skills",
+      "ref": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "commit": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "sourceType": "github",
+      "skillPath": "plugins/circle/skills/use-circle-wallets/SKILL.md",
+      "computedHash": "b65b40491448306e6996a072267fc0144a2dbe5c308b0a823242282686ccfea5"
+    },
+    "use-usdc": {
+      "source": "circlefin/skills",
+      "ref": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "commit": "bb707835167107d13a8832ef6ba44cd2a844ef48",
+      "sourceType": "github",
+      "skillPath": "plugins/circle/skills/use-usdc/SKILL.md",
+      "computedHash": "959f72ce55dd75e65dd73473a7b395df473f2030f778006adbf4763321467aed"
+    }
+  }
+}

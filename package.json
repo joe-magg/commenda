@@ -1,0 +1,37 @@
+{
+  "name": "commenda",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fully agentic live-stream flash auctions with delegated bidding agents",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "motion": "14.14.0",
+    "clsx": "2.1.1",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.5",
+    "@tailwindcss/postcss": "4.3.5",
+    "vitest": "5.1.0",
+    "eslint": "10.15.0",
+    "eslint-config-next": "16.4.6",
+    "skills": "1.9.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

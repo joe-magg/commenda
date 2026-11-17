@@ -1,0 +1,39 @@
+# Original hackathon brief — kept locally
+docs/original-brief.md
+
+# Design / process docs — Joe will include these toward the end
+SPEC.md
+DESIGN.md
+SECURITY.md
+SETUP.md
+INSTALL_STEPS.md
+SCAFFOLD_INSTALL.md
+SPEND_GUARDRAILS.md
+SKILLS_INSTALL.md
+ESCROW_DESIGN.md
+RESEARCH_DIGEST.md
+INTEGRATION_BRIEF.md
+
+# AI agent config — installed skills are restored via skills-lock.json
+.agents/
+.opencode/
+
+# Dependencies / build output
+node_modules/
+dist/
+.next/
+build/
+*.tsbuildinfo
+
+# Secrets and key material — never commit
+.env
+.env.local
+.env.*.local
+**/*keypair*.json
+**/*private*key*
+*.pem
+
+# Solidity / Foundry build output (lib/forge-std is a pinned git submodule)
+foundry-out/
+out/
+cache/

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "0x1111111111111111111111111111111111111111",
+    "payer": "0x2222222222222222222222222222222222222222",
+    "budgetMinor": 5000000,
+    "perBidCapMinor": 500000,
+    "watchlist": ["electronics", "collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": false,
+    "approvalAboveMinor": 250000
+  },
+  {
+    "id": "0x4444444444444444444444444444444444444444",
+    "payer": "0x5555555555555555555555555555555555555555",
+    "budgetMinor": 8000000,
+    "perBidCapMinor": 1000000,
+    "watchlist": ["art", "collectibles"],
+    "sellerAllowlist": ["0x3333333333333333333333333333333333333333"],
+    "approvalEnabled": false,
+    "approvalAboveMinor": 400000
+  }
+]

@@ -21,7 +21,8 @@ export function toHttp(result: SubmitResult): { code: number; body: BidResponse 
     case "pending":
       return { code: 200, body: { status: "pending", txHash: result.txHash } };
     case "failed":
-      return { code: 200, body: { status: "failed", txHash: result.txHash } };
+      // 5xx so x402 never settles the fee for a broadcast that never landed (auditor F2).
+      return { code: 502, body: { status: "failed", txHash: result.txHash } };
     case "rejected":
       return { code: 400, body: { status: "rejected", rule: result.rule } };
     case "needs_approval":

@@ -40,6 +40,8 @@ export type InFlightEntry = {
 
 export class AuctionState {
   readonly mandates = new Map<string, Mandate>();
+  /** On-chain bidder/seller address (lowercase) -> canonical agent id (auditor F4). */
+  readonly addressToAgent = new Map<string, string>();
   readonly ingest: IngestState = { cursor: null, seen: new Set() };
   readonly inFlight = new Map<string, InFlightEntry>();
 

@@ -46,7 +46,12 @@ export async function commit(
     if (!current) return;
     // decide-managed fields come from `next`; only spentMinor is adjusted by credits.
     const merged: Mandate = { ...next };
-    const r = reconcile(new Map([[agentId, merged]]), state.ingest, events);
+    const r = reconcile(
+      new Map([[agentId, merged]]),
+      state.ingest,
+      events,
+      (addr) => state.addressToAgent.get(addr.toLowerCase()) ?? addr.toLowerCase(),
+    );
     const updated = r.mandates.get(agentId);
     if (updated) state.setMandate(agentId, updated);
     state.ingest.cursor = r.ingest.cursor;

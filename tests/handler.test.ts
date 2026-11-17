@@ -26,10 +26,11 @@ describe("toHttp — DTO allowlist (auditor M4)", () => {
     expect(serialized).not.toMatch(/budget|spent|snapshot|detail|seenKeys/i);
   });
 
-  it("maps needs_approval / busy to 409, no_agent to 403", () => {
+  it("maps needs_approval / busy to 409, no_agent to 403, failed to 502 (never charged)", () => {
     expect(toHttp({ status: "needs_approval" }).code).toBe(409);
     expect(toHttp({ status: "busy" }).code).toBe(409);
     expect(toHttp({ status: "no_agent" }).code).toBe(403);
+    expect(toHttp({ status: "failed", txHash: "" }).code).toBe(502);
   });
 });
 

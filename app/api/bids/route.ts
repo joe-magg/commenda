@@ -16,13 +16,24 @@ import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
 import { AuctionState } from "@/lib/auction/state";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
+import { parseAgentConfig, seedState, derivePayerMap, deriveAgentKeys } from "@/lib/auction/seed";
+import agentConfigRaw from "@/config/agents.json";
 
 const NETWORK = "eip155:5042002" as const;
 const ROUTE_KEY = "/api/bids";
 
-// Demo in-memory state (single process). Payer→agent map from server config.
-const state = new AuctionState();
-const payerToAgent: Record<string, string> = JSON.parse(process.env.PAYER_TO_AGENT ?? "{}");
+// Survive Next.js dev hot reload: one state + one seed via globalThis (auditor F1).
+const configs = parseAgentConfig(agentConfigRaw);
+const g = globalThis as typeof globalThis & { __commenda?: { state: AuctionState; payer: Map<string, string>; keys: Record<string, `0x${string}`> } };
+if (!g.__commenda) {
+  const state = new AuctionState();
+  const envKeys = JSON.parse(process.env.AGENT_KEYS ?? "{}");
+  const summary = seedState(state, configs, envKeys);
+  console.info("[commenda] seeded agents:", summary.seeded.length, "kill-switched:", summary.killSwitched.length);
+  g.__commenda = { state, payer: derivePayerMap(configs), keys: deriveAgentKeys(configs, envKeys) };
+}
+const state = g.__commenda.state;
+const payerToAgent = g.__commenda.payer;
 
 // Seed agent mandates from trusted config (NOT from the LLM or request body).
 // In the demo these are set by an admin endpoint / seed script; see README.
@@ -44,12 +55,12 @@ function buildServer() {
 
 const deps: HandlerDeps = {
   state,
-  resolveAgentId: (payer) => payerToAgent[payer.toLowerCase()] ?? null,
+  resolveAgentId: (payer) => payerToAgent.get(payer.toLowerCase()) ?? null,
   now: () => Date.now(),
   getChain: () =>
     createChainAdapter({
       escrowAddress: env("ESCROW_ADDRESS"),
-      agentKeys: JSON.parse(process.env.AGENT_KEYS ?? "{}"),
+      agentKeys: g.__commenda!.keys,
     }),
 };
 

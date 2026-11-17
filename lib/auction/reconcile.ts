@@ -60,6 +60,8 @@ export function reconcile(
   mandates: ReadonlyMap<string, Mandate>,
   ingest: IngestState,
   events: readonly ChainEvent[],
+  /** Map an on-chain address to a mandate key; default identity for tests. (auditor F4) */
+  resolveAddress: (address: string) => string = (a) => a,
 ): ReconcileResult {
   const out = new Map<string, Mandate>();
   for (const [id, m] of mandates) out.set(id, { ...m }); // shallow copy; fields are immutable-ish Sets
@@ -83,8 +85,9 @@ export function reconcile(
         if (ev.prevBidder && ev.prevAmount > 0n) {
           const amt = toSafeMinor(ev.prevAmount, warnings, "BidPlaced.prevAmount");
           if (amt !== null) {
-            const m = out.get(ev.prevBidder);
-            if (m) out.set(ev.prevBidder, { ...m, spentMinor: m.spentMinor - amt });
+            const key = resolveAddress(ev.prevBidder.toLowerCase());
+            const m = out.get(key);
+            if (m) out.set(key, { ...m, spentMinor: m.spentMinor - amt });
             else warnings.push(`BidPlaced prevBidder ${ev.prevBidder} unknown; credit skipped`);
           }
         }
@@ -93,8 +96,9 @@ export function reconcile(
       case "EmergencyRefund": {
         const amt = toSafeMinor(ev.amount, warnings, "EmergencyRefund.amount");
         if (amt !== null) {
-          const m = out.get(ev.bidder);
-          if (m) out.set(ev.bidder, { ...m, spentMinor: m.spentMinor - amt });
+          const key = resolveAddress(ev.bidder.toLowerCase());
+          const m = out.get(key);
+          if (m) out.set(key, { ...m, spentMinor: m.spentMinor - amt });
           else warnings.push(`EmergencyRefund bidder ${ev.bidder} unknown; credit skipped`);
         }
         break;

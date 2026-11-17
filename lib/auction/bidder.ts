@@ -6,9 +6,10 @@
  * fee in testnet USDC, then reads the allowlisted status DTO. It never sees the
  * mandate, the rules, or any limit field (H1/H3): it only proposes a Bid.
  *
- * The endpoint is reached over HTTP (not by calling handleBid directly) so the
- * full x402 verify → settle → handler path is genuinely exercised on every bid.
+ * Every payment carries a stable `payment-identifier` derived from the bid id,
+ * so a retried submission settles at most once (Circle's double-charge guard).
  */
+import { createHash } from "node:crypto";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { x402Client } from "@x402/core/client";
 import { ExactEvmScheme, type ClientEvmSigner } from "@x402/evm";
@@ -21,7 +22,7 @@ import type { BidOutcome } from "./engine";
 const NETWORK = "eip155:5042002";
 const BASE_URL = process.env.COMMENDA_BASE_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`;
 
-type Agent = { id: string; label: string; paidFetch: ReturnType<typeof wrapFetchWithPayment> };
+type Agent = { id: string; label: string; key: `0x${string}` };
 
 /** Fixed bidding script: increasing amounts so idempotency never collides. */
 const PLAN = [
@@ -45,17 +46,7 @@ function buildAgents(): Agent[] {
   configs.forEach((c, i) => {
     const key = keys[c.id];
     if (typeof key !== "string" || !/^0x[a-f0-9]{64}$/i.test(key)) return; // kill-switched
-    const account = privateKeyToAccount(key as `0x${string}`);
-    const signer: ClientEvmSigner = {
-      address: account.address,
-      signTypedData: (msg) => account.signTypedData(msg as Parameters<typeof account.signTypedData>[0]),
-    };
-    const client = new x402Client().register(NETWORK, new ExactEvmScheme(signer));
-    out.push({
-      id: c.id,
-      label: `Agent ${i === 0 ? "A" : "B"}`,
-      paidFetch: wrapFetchWithPayment(fetch, client),
-    });
+    out.push({ id: c.id, label: `Agent ${i === 0 ? "A" : "B"}`, key: key as `0x${string}` });
   });
   return out;
 }
@@ -65,6 +56,33 @@ function driver() {
     g.__commendaDriver = { agents: buildAgents(), lastLeader: new Map<number, string>() };
   }
   return g.__commendaDriver;
+}
+
+/** 36-char id: "bid_" + 32 hex. Valid per Circle's 16-128 [A-Za-z0-9_-] rule. */
+export function paymentIdFor(bidKey: string): string {
+  return `bid_${createHash("sha256").update(bidKey).digest("hex").slice(0, 32)}`;
+}
+
+/** Build a payment-aware fetch with the idempotency extension baked in. */
+function paidFetchFor(key: `0x${string}`, paymentId: string) {
+  const account = privateKeyToAccount(key);
+  const signer: ClientEvmSigner = {
+    address: account.address,
+    signTypedData: (msg) => account.signTypedData(msg as Parameters<typeof account.signTypedData>[0]),
+  };
+  const client = new x402Client()
+    .register(NETWORK, new ExactEvmScheme(signer))
+    .registerExtension({
+      key: "payment-identifier",
+      enrichPaymentPayload: async (payload) => ({
+        ...payload,
+        extensions: {
+          ...(payload.extensions ?? {}),
+          "payment-identifier": { info: { required: true, id: paymentId } },
+        },
+      }),
+    });
+  return wrapFetchWithPayment(fetch, client);
 }
 
 /** Place one scripted bid. Returns null only if there is no active agent for the slot. */
@@ -84,7 +102,7 @@ export async function placeScriptedBid(lot: Lot, slot: number, chainLotId: numbe
   };
 
   try {
-    const res = await agent.paidFetch(`${BASE_URL}/api/bids`, {
+    const res = await paidFetchFor(agent.key, paymentIdFor(bid.id))(`${BASE_URL}/api/bids`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(bid),

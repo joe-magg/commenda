@@ -195,6 +195,12 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           >
             Next lot
           </button>
+          <a
+            href="/dashboard"
+            className="hidden whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-muted sm:block"
+          >
+            Dashboard
+          </a>
         </div>
       </header>
 

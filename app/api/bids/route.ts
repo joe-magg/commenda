@@ -12,6 +12,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withX402, x402ResourceServer } from "@x402/next";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import {
+  declarePaymentIdentifierExtension,
+  paymentIdentifierResourceServerExtension,
+} from "@x402/extensions/payment-identifier";
 import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
@@ -37,7 +41,11 @@ function buildServer() {
     payTo: env("FEE_RECIPIENT_ADDRESS"),
     network: NETWORK,
   });
-  return new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
+  return new x402ResourceServer(facilitator)
+    .register(NETWORK, new ExactEvmScheme())
+    // Advertise payment-identifier so clients attach a stable idempotency key;
+    // Circle uses it to settle a retried bid at most once.
+    .registerExtension(paymentIdentifierResourceServerExtension);
 }
 
 const deps: HandlerDeps = {
@@ -91,6 +99,9 @@ export const POST = (req: NextRequest) =>
         accepts: [{ scheme: "exact", price: "$0.001", network: NETWORK, payTo: process.env.FEE_RECIPIENT_ADDRESS ?? "" }],
         description: "Submit one bid to the Commenda auctioneer",
         mimeType: "application/json",
+        extensions: {
+          "payment-identifier": declarePaymentIdentifierExtension(true),
+        },
       },
     },
     server(),

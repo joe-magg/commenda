@@ -1,61 +1,41 @@
 /**
- * Agent-side bidder driver: the missing x402 CLIENT.
- *
- * Each seeded agent holds a server-side testnet key. The driver wraps fetch so
- * it automatically answers the 402 challenge on POST /api/bids, paying the flat
- * fee in testnet USDC, then reads the allowlisted status DTO. It never sees the
- * mandate, the rules, or any limit field (H1/H3): it only proposes a Bid.
- *
- * Every payment carries a stable `payment-identifier` derived from the bid id,
- * so a retried submission settles at most once (Circle's double-charge guard).
+ * Low-level x402 bid client. Loads funded agents from the registry and places
+ * one paid bid with a deterministic payment identifier (Circle idempotency).
+ * Agent selection / policy decisions live in worker-pool.ts.
  */
 import { createHash } from "node:crypto";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { x402Client } from "@x402/core/client";
 import { ExactEvmScheme, type ClientEvmSigner } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
-import { parseAgentConfig, type AgentConfig } from "./seed";
-import agentConfigRaw from "@/config/agents.json";
-import type { Lot } from "./lots";
+import { listAgents } from "@/lib/db/repo";
 import type { BidOutcome } from "./engine";
 
 const NETWORK = "eip155:5042002";
 const BASE_URL = process.env.COMMENDA_BASE_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`;
 
-type Agent = { id: string; label: string; key: `0x${string}` };
+export type PaidAgent = { id: string; label: string; key: `0x${string}` };
 
-/** Fixed bidding script: increasing amounts so idempotency never collides. */
-const PLAN = [
-  { agent: 0, amountMinor: 100_000 },
-  { agent: 1, amountMinor: 200_000 },
-  { agent: 0, amountMinor: 300_000 },
-  { agent: 1, amountMinor: 400_000 },
-  { agent: 0, amountMinor: 500_000 },
-  { agent: 1, amountMinor: 600_000 },
-] as const;
-
-const g = globalThis as typeof globalThis & {
-  __commendaDriver?: { agents: Agent[]; lastLeader: Map<number, string> };
+export type ProposedBid = {
+  id: string;
+  lotId: string;
+  amountMinor: number;
+  category: string;
+  seller: string;
 };
 
-function buildAgents(): Agent[] {
-  const configs: AgentConfig[] = parseAgentConfig(agentConfigRaw);
+/** Enabled registry agents that also have a signing key in env. */
+export function getPaidAgents(): PaidAgent[] {
   let keys: Record<string, string> = {};
   try { keys = JSON.parse(process.env.AGENT_KEYS ?? "{}"); } catch { /* kill-switched */ }
-  const out: Agent[] = [];
-  configs.forEach((c, i) => {
-    const key = keys[c.id];
-    if (typeof key !== "string" || !/^0x[a-f0-9]{64}$/i.test(key)) return; // kill-switched
-    out.push({ id: c.id, label: `Agent ${i === 0 ? "A" : "B"}`, key: key as `0x${string}` });
-  });
-  return out;
-}
-
-function driver() {
-  if (!g.__commendaDriver) {
-    g.__commendaDriver = { agents: buildAgents(), lastLeader: new Map<number, string>() };
+  const out: PaidAgent[] = [];
+  for (const a of listAgents()) {
+    if (!a.enabled || !a.walletAddress) continue;
+    const raw = keys[a.id] ?? keys[a.walletAddress.toLowerCase()];
+    if (typeof raw !== "string" || !/^0x[a-f0-9]{64}$/i.test(raw)) continue;
+    out.push({ id: a.id, label: a.label, key: raw as `0x${string}` });
   }
-  return g.__commendaDriver;
+  return out;
 }
 
 /** 36-char id: "bid_" + 32 hex. Valid per Circle's 16-128 [A-Za-z0-9_-] rule. */
@@ -63,7 +43,6 @@ export function paymentIdFor(bidKey: string): string {
   return `bid_${createHash("sha256").update(bidKey).digest("hex").slice(0, 32)}`;
 }
 
-/** Build a payment-aware fetch with the idempotency extension baked in. */
 function paidFetchFor(key: `0x${string}`, paymentId: string) {
   const account = privateKeyToAccount(key);
   const signer: ClientEvmSigner = {
@@ -85,22 +64,8 @@ function paidFetchFor(key: `0x${string}`, paymentId: string) {
   return wrapFetchWithPayment(fetch, client);
 }
 
-/** Place one scripted bid. Returns null only if there is no active agent for the slot. */
-export async function placeScriptedBid(lot: Lot, slot: number, chainLotId: number): Promise<BidOutcome | null> {
-  const step = PLAN[slot];
-  if (!step) return null;
-  const d = driver();
-  const agent = d.agents[step.agent];
-  if (!agent) return null;
-
-  const bid = {
-    id: `${agent.id.slice(0, 10)}-${chainLotId}-${step.amountMinor}`,
-    lotId: String(chainLotId),
-    amountMinor: step.amountMinor,
-    category: lot.category,
-    seller: lot.seller,
-  };
-
+/** Place one bid for a specific agent. */
+export async function placeBid(agent: PaidAgent, bid: ProposedBid): Promise<BidOutcome> {
   try {
     const res = await paidFetchFor(agent.key, paymentIdFor(bid.id))(`${BASE_URL}/api/bids`, {
       method: "POST",
@@ -108,26 +73,11 @@ export async function placeScriptedBid(lot: Lot, slot: number, chainLotId: numbe
       body: JSON.stringify(bid),
     });
     const dto = (await res.json().catch(() => ({}))) as { status?: string; rule?: string; txHash?: string };
-
     if (res.ok && (dto.status === "placed" || dto.status === "pending")) {
-      const previousBidder = d.lastLeader.get(chainLotId);
-      d.lastLeader.set(chainLotId, agent.id);
-      return {
-        ok: true,
-        amountMinor: step.amountMinor,
-        bidder: agent.id,
-        txHash: dto.txHash ?? "",
-        previousBidder,
-      };
+      return { ok: true, amountMinor: bid.amountMinor, bidder: agent.id, txHash: dto.txHash ?? "" };
     }
-    const rule = dto.rule ?? dto.status ?? `HTTP_${res.status}`;
-    return { ok: false, agentId: agent.id, rule, amountMinor: step.amountMinor };
-  } catch (e) {
-    return { ok: false, agentId: agent.id, rule: "NETWORK_ERROR", amountMinor: step.amountMinor };
+    return { ok: false, agentId: agent.id, rule: dto.rule ?? dto.status ?? `HTTP_${res.status}`, amountMinor: bid.amountMinor };
+  } catch {
+    return { ok: false, agentId: agent.id, rule: "NETWORK_ERROR", amountMinor: bid.amountMinor };
   }
-}
-
-/** Exposed for the demo status panel: which agents are live. */
-export function activeAgents(): { id: string; label: string }[] {
-  return driver().agents.map((a) => ({ id: a.id, label: a.label }));
 }

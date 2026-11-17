@@ -65,7 +65,7 @@ export function renderVoice(lineId: unknown, args: unknown): RenderedVoice {
     }
     case "bidCall": {
       const amount = slot(a, "amountMinor", 1, MAX_AMOUNT_MINOR);
-      text = `${speakAmount(amount)}. Do I hear more?`;
+      text = `${speakAmount(amount)}.`;
       break;
     }
     case "countdown": {

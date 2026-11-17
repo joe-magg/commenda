@@ -32,6 +32,8 @@ export type AuctionEvent =
   | { type: "reject"; lotId: number; agentId: string; rule: string; amountMinor: number }
   | { type: "outbid"; lotId: number; previousBidder: string; amountMinor: number; label: string }
   | { type: "countdown"; seconds: number }
+  | { type: "agent_join"; agentId: string; label: string; lotId: number }
+  | { type: "agent_leave"; agentId: string; label: string; lotId: number; reason: string }
   | { type: "sold"; lotId: number; amountMinor: number; winner: string | null; txHash?: string }
   | { type: "caption"; text: string; lineId: string; audioUrl?: string }
   | { type: "voice_warning"; reason: string };
@@ -43,7 +45,7 @@ export type BidOutcome =
 export type SpokenLine = { text: string; audioUrl?: string; warning?: string };
 
 export type EngineHooks = {
-  onLotOpen?: (lot: Lot) => void;
+  onLotOpen?: (lot: Lot, chainLotId: number) => void;
   onBidSlot?: (lot: Lot, slot: number, chainLotId: number) => Promise<BidOutcome | null>;
   onSold?: (lot: Lot, amountMinor: number, chainLotId: number) => Promise<string | undefined>;
   speak?: (lineId: string, args: Record<string, number>, lotIndex: number) => Promise<SpokenLine | undefined>;
@@ -78,6 +80,11 @@ export class AuctionEngine {
 
   setHooks(hooks: EngineHooks): void {
     this.hooks = hooks;
+  }
+
+  /** Emit an event from an external worker (agent join/leave, etc.). */
+  emitExternal(e: AuctionEvent): void {
+    this.emit(e);
   }
 
   subscribe(fn: (e: AuctionEvent) => void): () => void {
@@ -167,7 +174,7 @@ export class AuctionEngine {
     this.emit({ type: "phase", phase: "intro" });
     this.emit({ type: "lot_open", lot, index, total: LOTS.length });
     this.emit({ type: "snapshot", state: this.snapshot() });
-    this.hooks.onLotOpen?.(lot);
+    this.hooks.onLotOpen?.(lot, this.currentChainLotId);
     this.say("lotIntro", { n: lot.id + 1 });
     this.later(() => this.beginBidding(lot), TIMING.introMs);
   }

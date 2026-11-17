@@ -126,6 +126,12 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           if (soundRef.current) playSfx("sold");
           window.setTimeout(() => setSold(null), 2600);
           break;
+        case "agent_join":
+          pushActivity("bid", `${e.label} joined lot ${e.lotId + 1}`);
+          break;
+        case "agent_leave":
+          pushActivity("reject", `${e.label} left — ${e.reason}`);
+          break;
         case "countdown":
           if (soundRef.current) playSfx("countdown");
           break;

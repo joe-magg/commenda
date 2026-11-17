@@ -1,10 +1,9 @@
 /**
- * One-time wiring of engine hooks to the real bidder, voice and settlement
- * modules. Called lazily from the first SSE connection so dev reloads and
- * route imports cannot double-start the show.
+ * One-time wiring of engine hooks to the worker pool, voice and settlement.
+ * Called lazily from the first SSE connection so dev reloads cannot double-start.
  */
 import { getEngine } from "./engine";
-import { placeScriptedBid, activeAgents } from "./bidder";
+import { getWorkerPool } from "./worker-pool";
 import { settleOnChain } from "./chain";
 import { startResolver } from "./resolver-runner";
 import { speak } from "@/lib/voice/synth";
@@ -18,11 +17,20 @@ export function ensureBootstrapped(): void {
   if (g.__commendaBootstrapped) return;
   g.__commendaBootstrapped = true;
   if (!g.__commendaResolver) g.__commendaResolver = startResolver();
+
   const engine = getEngine();
+  const pool = getWorkerPool();
+  pool.setEmitter((e) => engine.emitExternal(e));
+
   engine.setHooks({
-    onBidSlot: (lot, slot, chainLotId) => placeScriptedBid(lot, slot, chainLotId),
+    onLotOpen: (lot, chainLotId) => pool.onLotOpen(lot, chainLotId),
+    onBidSlot: (lot, slot, chainLotId) => pool.onBidSlot(lot, slot, chainLotId),
     speak: (lineId, args, lotIndex) => speak(lineId, args, lotIndex),
-    onSold: (_lot, _amount, chainLotId) => settleOnChain(chainLotId).catch(() => ""),
+    onSold: async (lot, _amount, chainLotId) => {
+      const tx = await settleOnChain(chainLotId).catch(() => "");
+      pool.onLotEnd(chainLotId);
+      return tx;
+    },
   });
-  console.info("[commenda] engine bootstrapped; live agents:", activeAgents().map((a) => a.label).join(", ") || "(none)");
+  console.info("[commenda] worker pool wired; engine ready");
 }

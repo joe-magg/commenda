@@ -35,6 +35,7 @@ describe("voice templates — no free text reaches TTS", () => {
   });
 
   it("never speaks the currency word", () => {
+    expect(renderVoice("bidCall", { amountMinor: 350_000 }).text).toBe("35 cents.");
     expect(renderVoice("bidCall", { amountMinor: 350_000 }).text).not.toContain("USDC");
     expect(renderVoice("sold", { amountMinor: 600_000 }).text).not.toContain("USDC");
   });

@@ -17,6 +17,7 @@ export default function Home() {
     watchlist: a.policy.watchlist,
     approvalEnabled: a.policy.approvalEnabled,
     approvalAboveMinor: a.policy.approvalAboveMinor,
+    maxWins: a.policy.maxWins,
     active: a.enabled && a.walletAddress !== null,
   }));
   return <AuctionRoom agents={agents} />;

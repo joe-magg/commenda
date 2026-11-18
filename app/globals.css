@@ -1,19 +1,24 @@
 @import "tailwindcss";
 
-/* Single source of truth. Cool pale grey, deep ink, one signal red for live
-   state. Components reference these variables, never raw hex. */
+/* Liquid-glass system: Apple-style smoothness translated for the web.
+   Mostly neutral, one saturated cyan accent. No red anywhere.
+   All values live here; components reference tokens, never raw hex. */
 @theme inline {
-  --color-bg: #f3f5f7;
-  --color-surface: #ffffff;
-  --color-ink: #161b21;
-  --color-muted: #5d6773;
-  --color-subtle: #909aa6;
-  --color-line: #dfe4ea;
-  --color-accent: #161b21;
-  --color-live: #c8402c;
-  --color-settled: #1c6b58;
-  --radius-card: 12px;
-  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
+  --color-bg: #eef2f5;
+  --color-ink: #14171a;
+  --color-muted: #55606a;
+  --color-subtle: #8b959e;
+  --color-line: rgba(255, 255, 255, 0.55);
+  --color-accent: #00a9d6;
+  --color-accent-deep: #007f9f;
+  --color-win: #b8862b;
+  --radius-card: 20px;
+  --radius-glass: 26px;
+
+  --glass-bg: linear-gradient(150deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.55));
+  --glass-border: 1px solid rgba(255, 255, 255, 0.85);
+  --glass-inner: inset 0 1px 1px rgba(255, 255, 255, 0.95), inset 0 -14px 26px rgba(20, 70, 95, 0.12);
+  --glass-shadow: 0 1px 1px rgba(255, 255, 255, 0.7) inset, 0 12px 40px rgba(20, 50, 70, 0.13), 0 2px 8px rgba(20, 50, 70, 0.06);
 }
 
 html,
@@ -22,17 +27,33 @@ body {
 }
 
 body {
-  background: var(--color-bg);
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(0, 169, 214, 0.13), transparent 60%),
+    radial-gradient(1000px 700px at 110% 20%, rgba(120, 170, 200, 0.16), transparent 60%),
+    linear-gradient(180deg, #f3f7fa 0%, #e9eff3 100%);
+  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  letter-spacing: 0;
 }
 
 @utility card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
+  background: var(--glass-bg);
+  border: var(--glass-border);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--glass-inner), var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+
+@utility glass-stage {
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: var(--radius-glass);
+  box-shadow: var(--glass-inner), 0 24px 70px rgba(15, 60, 85, 0.18);
+  backdrop-filter: blur(22px) saturate(170%);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
 }
 
 @utility tabular {
@@ -40,23 +61,39 @@ body {
   font-feature-settings: "tnum";
 }
 
-/* The stage: a quiet spotlight + slow rotating ring. One motion moment. */
+@utility display-type {
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+
 @keyframes stage-spin {
   to { transform: rotate(360deg); }
 }
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  50% { opacity: 0.4; }
 }
-.stage-ring { animation: stage-spin 24s linear infinite; }
-.live-dot { animation: live-pulse 1.8s ease-in-out infinite; }
+.stage-ring { animation: stage-spin 26s linear infinite; }
+.live-dot { animation: live-pulse 1.9s ease-in-out infinite; }
 
+/* Apple-style reduced-motion + reduced-transparency: a gentler, non-vestibular
+   equivalent. Feedback stays via opacity/color. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .card, .glass-stage {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+@media (prefers-contrast: more) {
+  .card, .glass-stage {
+    border: 1px solid rgba(20, 23, 26, 0.4) !important;
   }
 }

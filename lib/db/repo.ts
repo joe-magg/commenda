@@ -79,6 +79,26 @@ function toAgent(r: AgentRow): Agent {
   };
 }
 
+/** Map a connected wallet to a demo user: a funded agent's owner, or a new wallet user. */
+export function userForAddress(address: string): User | null {
+  const db = getDb();
+  const lower = address.toLowerCase();
+  const agent = db.prepare("SELECT owner_id FROM agents WHERE lower(wallet_address) = ? LIMIT 1").get(lower) as
+    { owner_id: string } | undefined;
+  if (agent) return listUsers().find((u) => u.id === agent.owner_id) ?? null;
+
+  const id = `wallet_${lower}`;
+  const existing = listUsers().find((u) => u.id === id);
+  if (existing) return existing;
+  const now = Date.now();
+  db.prepare("INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)").run(
+    id,
+    `${lower.slice(0, 6)}…${lower.slice(-4)}`,
+    now,
+  );
+  return { id, name: `${lower.slice(0, 6)}…${lower.slice(-4)}`, createdAt: now };
+}
+
 export function listUsers(): User[] {
   const rows = getDb().prepare("SELECT id, name, created_at FROM users ORDER BY created_at, id").all() as
     { id: string; name: string; created_at: number }[];

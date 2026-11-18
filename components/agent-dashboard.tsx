@@ -42,7 +42,7 @@ type Claim = {
 
 const CATEGORIES = ["electronics", "art", "collectibles"];
 
-export function AgentDashboard() {
+export function AgentDashboard({ userName }: { userName: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -132,9 +132,16 @@ export function AgentDashboard() {
             Delegate a budget and a watchlist. An agent bids only within the policy you set.
           </p>
         </div>
-        <a href="/" className="whitespace-nowrap rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-ink hover:border-muted">
-          Watch the auction
-        </a>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">{userName}</span>
+          <button onClick={async () => { await fetch("/api/auth", { method: "DELETE" }); window.location.reload(); }}
+            className="whitespace-nowrap rounded-xl border border-white/70 bg-white/55 px-3 py-2 text-xs font-medium text-ink shadow-sm backdrop-blur-xl">
+            Sign out
+          </button>
+          <a href="/" className="whitespace-nowrap rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)]">
+            Watch the auction
+          </a>
+        </div>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">

@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env
+.env.local
+.env.*.local
+cache
+foundry-out
+out
+notes
+docs
+*.tsbuildinfo
+npm-debug.log*

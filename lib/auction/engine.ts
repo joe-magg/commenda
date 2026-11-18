@@ -11,7 +11,7 @@
  */
 import { LOTS, type Lot, bidderLabel } from "./lots";
 
-export type Phase = "idle" | "intro" | "bidding" | "countdown" | "sold";
+export type Phase = "idle" | "intro" | "bidding" | "countdown" | "sold" | "ended";
 
 export type EngineSnapshot = {
   started: boolean;
@@ -39,6 +39,7 @@ export type AuctionEvent =
   | { type: "agent_leave"; agentId: string; label: string; lotId: number; reason: string }
   | { type: "sold"; lotId: number; amountMinor: number; winner: string | null; txHash?: string }
   | { type: "unsold"; lotId: number }
+  | { type: "auction_end"; lots: number }
   | { type: "caption"; text: string; lineId: string; audioUrl?: string }
   | { type: "voice_warning"; reason: string };
 
@@ -155,8 +156,10 @@ export class AuctionEngine {
   }
 
   start(): void {
-    if (this.state.started) return;
-    this.state.started = true;
+    // A finished auction may be started again with a fresh catalog (the
+    // scheduler runs one auction per session); only a LIVE run is guarded.
+    if (this.state.started && this.state.phase !== "ended") return;
+    this.state = { ...this.state, started: true };
     this.openLot(0);
   }
 
@@ -168,15 +171,35 @@ export class AuctionEngine {
     this.clearTimers();
     const lot = this.state.lot;
     const advance = () => {
-      const i = (this.state.lotIndex + 1) % this.lots.length;
       this.advancing = false;
-      this.openLot(i);
+      this.advanceLot();
     };
     if (lot && this.state.phase !== "sold" && this.state.currentBidMinor > lot.openingMinor) {
       void this.finishLot(lot, advance);
     } else {
       advance();
     }
+  }
+
+  /** Advance to the next lot, or end the auction when the catalog is done. */
+  private advanceLot(): void {
+    const next = this.state.lotIndex + 1;
+    if (next >= this.lots.length) {
+      this.endAuction();
+      return;
+    }
+    this.openLot(next);
+  }
+
+  /** One auction = one pass over the catalog. Ending lets the scheduler run
+   *  the next session after its gap — auctions are genuinely distinct. */
+  private endAuction(): void {
+    this.clearTimers();
+    this.advancing = false;
+    this.state = { ...this.state, started: false, phase: "ended", phaseEndsAt: 0 };
+    this.emit({ type: "phase", phase: "ended" });
+    this.emit({ type: "auction_end", lots: this.lots.length });
+    this.emit({ type: "snapshot", state: this.snapshot() });
   }
 
   private openLot(index: number): void {
@@ -330,7 +353,7 @@ export class AuctionEngine {
       this.say("sold", { amountMinor: amount });
     }
 
-    const advance = done ?? (() => this.openLot((this.state.lotIndex + 1) % this.lots.length));
+    const advance = done ?? (() => this.advanceLot());
     this.later(advance, TIMING.soldMs);
   }
 }

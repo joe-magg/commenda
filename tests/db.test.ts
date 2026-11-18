@@ -15,9 +15,12 @@ beforeAll(async () => {
 
 describe("agent registry (SQLite)", () => {
   it("seeds users, agents, policies and a session", () => {
-    expect(repo.listUsers().length).toBe(3);
+    // Every agent is its own principal: one user per funded agent, each with
+    // their own guardrails — not a shared demo owner.
+    expect(repo.listUsers().length).toBe(8);
     const agents = repo.listAgents();
     expect(agents.length).toBe(8);
+    expect(new Set(agents.map((a) => a.ownerId)).size).toBe(8);
     // Liveness is derived from AGENT_KEYS; in the test env there are no keys,
     // so all agents seed as standby (kill-switched) — never a hardcoded count.
     expect(agents.filter((a) => a.enabled).length).toBe(0);
@@ -25,6 +28,24 @@ describe("agent registry (SQLite)", () => {
     expect(repo.listSessions()[0].catalog.length).toBe(6);
   });
 
+  it("creates and closes auction sessions", () => {
+    const before = repo.listSessions().length;
+    const session = repo.createSession("Test Auction", [
+      { id: 0, title: "A", sku: "A-1", category: "art", condition: "new", provenance: "x", artSeed: "aaaa", openingMinor: 100_000 },
+    ]);
+    expect(session.status).toBe("live");
+    expect(repo.listSessions().length).toBe(before + 1);
+    repo.setSessionStatus(session.id, "ended");
+    expect(repo.listSessions().find((s) => s.id === session.id)?.status).toBe("ended");
+  });
+
+  it("filters the audit log by kind prefix", () => {
+    repo.recordAuditEvent(1000, "agent-1", "bid_self_outbid", "held the lead");
+    repo.recordAuditEvent(1001, "agent-1", "claim_redeemed", "sku");
+    const decisions = repo.listAuditEvents(50, "bid_");
+    expect(decisions.length).toBeGreaterThan(0);
+    expect(decisions.every((e) => e.kind.startsWith("bid_"))).toBe(true);
+  });
   it("creates an agent with a policy and a one-time key", () => {
     const owner = repo.listUsers()[0].id;
     const { agent, apiKey } = repo.createAgent({

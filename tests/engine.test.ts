@@ -146,6 +146,31 @@ describe("auction engine state machine", () => {
     expect(engine.snapshot().lotIndex).toBe(1);
   });
 
+  it("runs the catalog exactly once, then ends (scheduler model)", async () => {
+    const ends: number[] = [];
+    engine.subscribe((e) => { if (e.type === "auction_end") ends.push(e.lots); });
+    engine.start();
+    // One pass over all six lots: intro + slots + countdown + sold each.
+    await vi.advanceTimersByTimeAsync(6 * (TIMING.introMs + TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs + 2_000));
+    expect(ends).toEqual([engine.snapshot().totalLots]);
+    expect(engine.snapshot().phase).toBe("ended");
+    // The engine can be started again for a fresh session.
+    engine.start();
+    expect(engine.snapshot().phase).toBe("intro");
+  });
+
+  it("manual Next on the last lot ends the auction", async () => {
+    engine.start();
+    engine.next(); // no bids → straight through every lot
+    for (let i = 0; i < 6 && engine.snapshot().phase !== "ended"; i++) {
+      await vi.advanceTimersByTimeAsync(TIMING.soldMs + TIMING.introMs + TIMING.slotGapMs + 100);
+      engine.next();
+    }
+    expect(engine.snapshot().phase).toBe("ended");
+    engine.start(); // restartable
+    expect(engine.snapshot().phase).toBe("intro");
+  });
+
   it("gives each loop of a lot a fresh on-chain id", async () => {
     const ids: number[] = [];
     engine.setHooks({

@@ -275,3 +275,28 @@ export function recordAuditEvent(at: number, agentId: string, kind: string, deta
     .prepare("INSERT INTO audit_events (at, agent_id, kind, detail) VALUES (?, ?, ?, ?)")
     .run(at, agentId, kind.slice(0, 64), detail.slice(0, 500));
 }
+
+/** Persist a new auction session with its generated catalog. */
+export function createSession(name: string, catalog: Session["catalog"]): Session {
+  const db = getDb();
+  const id = `flash-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const now = Date.now();
+  db.prepare(
+    "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, 'live', ?, ?)",
+  ).run(id, name, now, JSON.stringify(catalog), now);
+  return { id, name, startsAt: now, status: "live", catalog, createdAt: now };
+}
+
+export function setSessionStatus(id: string, status: "scheduled" | "live" | "ended"): void {
+  getDb().prepare("UPDATE sessions SET status = ? WHERE id = ?").run(status, id);
+}
+
+/** Audit events with an optional kind prefix filter (e.g. "bid_" for decisions). */
+export function listAuditEvents(limit = 100, kindPrefix?: string): { at: number; agentId: string | null; kind: string; detail: string }[] {
+  const rows = kindPrefix
+    ? (getDb().prepare("SELECT * FROM audit_events WHERE kind LIKE ? ORDER BY id DESC LIMIT ?").all(`${kindPrefix}%`, limit) as
+        { at: number; agent_id: string | null; kind: string; detail: string }[])
+    : (getDb().prepare("SELECT * FROM audit_events ORDER BY id DESC LIMIT ?").all(limit) as
+        { at: number; agent_id: string | null; kind: string; detail: string }[]);
+  return rows.map((r) => ({ at: r.at, agentId: r.agent_id, kind: r.kind, detail: r.detail }));
+}

@@ -75,23 +75,24 @@ function seed(d: DatabaseSync): void {
 
   const now = Date.now();
   const insertUser = d.prepare("INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)");
-  insertUser.run("demo-you", "You", now);
-  insertUser.run("demo-maya", "Maya", now);
-  insertUser.run("demo-theo", "Theo", now);
-
   const insertAgent = d.prepare(
     "INSERT INTO agents (id, owner_id, label, wallet_address, enabled, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   const insertPolicy = d.prepare(
     "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
-  const owners = ["demo-you", "demo-you", "demo-maya", "demo-maya", "demo-theo", "demo-theo", "demo-you", "demo-maya"];
+
+  // Every agent is its own principal: one user per agent, each with their own
+  // guardrails. The demo pretends eight different people showed up.
+  const OWNERS = ["Ava", "Bao", "Cleo", "Dmitri", "Esme", "Farid", "Gus", "Hana"];
   // An agent is live if it has a signing key in AGENT_KEYS, not by its position.
   let keys: Record<string, string> = {};
   try { keys = JSON.parse(process.env.AGENT_KEYS ?? "{}"); } catch { /* none */ }
   agentConfigRaw.forEach((c, i) => {
+    const owner = `demo-user-${OWNERS[i].toLowerCase()}`;
+    insertUser.run(owner, OWNERS[i], now);
     const live = typeof keys[c.id] === "string" && /^0x[a-f0-9]{64}$/i.test(keys[c.id]);
-    insertAgent.run(c.id, owners[i], `Agent ${String.fromCharCode(65 + i)}`, live ? c.payer : null, live ? 1 : 0, live ? "bidding" : "standby", now);
+    insertAgent.run(c.id, owner, `Agent ${String.fromCharCode(65 + i)}`, live ? c.payer : null, live ? 1 : 0, live ? "bidding" : "standby", now);
     insertPolicy.run(
       c.id,
       c.budgetMinor,
@@ -105,7 +106,8 @@ function seed(d: DatabaseSync): void {
   });
 
   // Generate the fixed item block for the session up front — the Sotheby's
-  // model: bidders see the catalog before the session starts.
+  // model: bidders see the catalog before the session starts. New auctions
+  // are created per-run by the scheduler with fresh 3-item catalogs.
   const catalog = generateCatalog("commenda-flash-001");
   d.prepare(
     "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, ?, ?, ?)",

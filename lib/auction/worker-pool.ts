@@ -183,6 +183,14 @@ export class BidWorkerPool {
     return result;
   }
 
+  /** Reset per-auction state: a new session means fresh budgets-for-wins and
+   *  no stale lot maps. Called by the scheduler before each auction. */
+  resetCycle(): void {
+    this.cycleWins.clear();
+    this.lots.clear();
+    this.lastLotId = -1;
+  }
+
   winnerFor(chainLotId: number): string | null {
     return this.lots.get(chainLotId)?.currentBidder ?? null;
   }

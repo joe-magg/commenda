@@ -138,3 +138,25 @@ describe("BidWorkerPool behavioral invariants", () => {
     expect(outcome?.ok).toBe(true);
   });
 });
+
+describe("BidWorkerPool cycle reset", () => {
+  it("resetCycle clears win counts and stale lot state (new session, fresh budget-for-wins)", async () => {
+    const pool = new BidWorkerPool();
+    pool.onLotOpen(lot, lot.chainId);
+    bidderState.impl = (agent, bid) =>
+      Promise.resolve({
+        ok: true,
+        amountMinor: (bid as { amountMinor: number }).amountMinor,
+        bidder: (agent as { id: string }).id,
+        txHash: "0x1",
+      });
+    await pool.onBidSlot(lot, 0, lot.chainId); // agent wins nothing yet, but leader set
+    pool.onLotEnd(lot.chainId, "agent-A");
+    // Simulate a fresh session: reset, then the same agents may deploy again.
+    pool.resetCycle();
+    const lot2 = { ...lot, chainId: lot.chainId + 5000 };
+    pool.onLotOpen(lot2, lot2.chainId);
+    const outcome = await pool.onBidSlot(lot2, 0, lot2.chainId);
+    expect(outcome?.ok).toBe(true);
+  });
+});

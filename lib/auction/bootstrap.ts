@@ -6,6 +6,7 @@ import { getEngine } from "./engine";
 import { getWorkerPool } from "./worker-pool";
 import { settleOnChain, highestBidOnChain } from "./chain";
 import { startResolver } from "./resolver-runner";
+import { startAuctionScheduler } from "./scheduler";
 import { speak } from "@/lib/voice/synth";
 import { createClaim, listSessions } from "@/lib/db/repo";
 import { itemsToLots, type GeneratedItem } from "@/lib/items/generator";
@@ -24,10 +25,6 @@ export function ensureBootstrapped(): void {
   if (!g.__commendaResolver) g.__commendaResolver = startResolver();
 
   const engine = getEngine();
-  const sessions = listSessions();
-  if (sessions[0]?.catalog.length) {
-    engine.setLots(itemsToLots(sessions[0].catalog as GeneratedItem[]));
-  }
   const pool = getWorkerPool();
   pool.setEmitter((e) => engine.emitExternal(e));
 
@@ -79,5 +76,9 @@ export function ensureBootstrapped(): void {
       return tx;
     },
   });
+
+  // Auctions run on a fixed schedule: one session at a time, a fresh
+  // generated catalog each run, a gap between runs (see scheduler.ts).
+  startAuctionScheduler();
   console.info("[commenda] worker pool wired; engine ready");
 }

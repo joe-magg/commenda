@@ -6,10 +6,13 @@ import type { AuctionEvent, EngineSnapshot } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
 import { ItemArt } from "@/components/item-art";
-import { RollingNumber } from "@/components/rolling-number";
 import { agentIdentity } from "@/lib/agent-identity";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { MagicCard } from "@/components/ui/magic-card";
+import { NumberTicker } from "@/components/ui/number-ticker";
+import { Dock, DockIcon } from "@/components/ui/dock";
+import { AnimatedList, AnimatedListItem } from "@/components/ui/animated-list";
+import { Volume2, VolumeX, SkipForward, LayoutDashboard } from "lucide-react";
 
 export type AgentView = {
   id: string;
@@ -193,24 +196,10 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           <span className="display-type text-[23px] font-semibold">commenda</span>
           <span className="hidden text-xs text-muted sm:inline">agentic live auction</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="mr-1 flex items-center gap-2 text-xs text-muted">
-            <span className={`h-1.5 w-1.5 rounded-full ${connected ? "live-dot bg-accent" : "bg-subtle"}`} />
-            {connected ? "live" : "connecting"}
-          </span>
-          <button onClick={toggleSound} aria-pressed={soundOn}
-            className="whitespace-nowrap rounded-xl border border-white/70 bg-white/55 px-3 py-2 text-xs font-medium text-ink shadow-sm backdrop-blur-xl transition-transform active:scale-[0.97]">
-            {soundOn ? "Sound on" : "Sound off"}
-          </button>
-          <button onClick={goNext}
-            className="whitespace-nowrap rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)] transition-transform active:scale-[0.97]">
-            Next lot
-          </button>
-          <a href="/dashboard"
-            className="hidden whitespace-nowrap rounded-xl border border-white/70 bg-white/55 px-3 py-2 text-xs font-medium text-ink shadow-sm backdrop-blur-xl transition-transform active:scale-[0.97] sm:block">
-            Dashboard
-          </a>
-        </div>
+        <span className="flex items-center gap-2 text-xs text-muted">
+          <span className={`h-1.5 w-1.5 rounded-full ${connected ? "live-dot bg-accent" : "bg-subtle"}`} />
+          {connected ? "live" : "connecting"}
+        </span>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -257,7 +246,12 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Current bid</div>
               {/* Number owns its own centered line; the unit sits below it, so
                   the value reads as one locked object instead of drifting. */}
-              <RollingNumber value={formatMinor(current)} className="mt-1 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold" />
+              <NumberTicker
+                value={current / 1_000_000}
+                startValue={current / 1_000_000}
+                decimalPlaces={2}
+                className="mt-1 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold !text-ink"
+              />
               <div className="mt-1 text-[13px] font-medium uppercase tracking-[0.12em] text-muted">USDC</div>
               {phase === "countdown" && (
                 <motion.div key={snap?.countdown} initial={{ opacity: 0.4, y: -4 }} animate={{ opacity: 1, y: 0 }}
@@ -273,21 +267,25 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">Bid tape</h2>
               <span className="text-[10px] text-subtle">newest first</span>
             </div>
-            <div className="flex max-h-[190px] flex-col gap-1.5 overflow-y-auto">
-              <AnimatePresence initial={false}>
-                {bids.map((b) => {
-                  const id = agentIdentity(b.agentId);
-                  return (
-                    <motion.div key={b.key} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                      className="flex items-center gap-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-xs shadow-sm">
-                      <span className="text-sm" style={{ color: id.color }}>{id.glyph}</span>
-                      <span className="font-semibold text-ink">{b.label}</span>
-                      <span className="tabular ml-auto font-semibold text-accent-deep">{formatMinor(b.amountMinor)}</span>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-              {bids.length === 0 && <span className="text-xs text-subtle">No bids yet on this lot.</span>}
+            <div className="max-h-[190px] overflow-y-auto">
+              {bids.length === 0 ? (
+                <span className="text-xs text-subtle">No bids yet on this lot.</span>
+              ) : (
+                <AnimatedList delay={140} className="!gap-1.5">
+                  {bids.map((b) => {
+                    const id = agentIdentity(b.agentId);
+                    return (
+                      <AnimatedListItem key={b.key}>
+                        <div className="flex items-center gap-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-xs shadow-sm">
+                          <span className="text-sm" style={{ color: id.color }}>{id.glyph}</span>
+                          <span className="font-semibold text-ink">{b.label}</span>
+                          <span className="tabular ml-auto font-semibold text-accent-deep">{formatMinor(b.amountMinor)}</span>
+                        </div>
+                      </AnimatedListItem>
+                    );
+                  })}
+                </AnimatedList>
+              )}
             </div>
           </div>
         </section>
@@ -384,6 +382,22 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         <span>bids pay a $0.001 x402 fee</span>
         <span>outbid funds refunded instantly</span>
       </footer>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center">
+        <Dock className="pointer-events-auto !mt-0 border-white/70 bg-white/60 shadow-[0_12px_40px_rgba(15,60,85,0.18)]">
+          <DockIcon onClick={toggleSound} aria-label={soundOn ? "Mute" : "Enable sound"} title={soundOn ? "Sound on" : "Sound off"}>
+            {soundOn ? <Volume2 className="size-5 text-ink" /> : <VolumeX className="size-5 text-muted" />}
+          </DockIcon>
+          <DockIcon onClick={goNext} aria-label="Next lot" title="Next lot">
+            <SkipForward className="size-5 text-accent-deep" />
+          </DockIcon>
+          <a href="/dashboard" aria-label="Dashboard" title="Dashboard">
+            <DockIcon>
+              <LayoutDashboard className="size-5 text-ink" />
+            </DockIcon>
+          </a>
+        </Dock>
+      </div>
     </main>
   );
 }

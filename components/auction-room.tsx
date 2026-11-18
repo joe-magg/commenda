@@ -8,6 +8,8 @@ import { playSfx } from "@/lib/client/sfx";
 import { ItemArt } from "@/components/item-art";
 import { RollingNumber } from "@/components/rolling-number";
 import { agentIdentity } from "@/lib/agent-identity";
+import { BorderBeam } from "@/components/ui/border-beam";
+import { MagicCard } from "@/components/ui/magic-card";
 
 export type AgentView = {
   id: string;
@@ -35,7 +37,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
   const [lot, setLot] = useState<Lot | null>(null);
   const [bids, setBids] = useState<BidItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const [caption, setCaption] = useState("");
   const [soundOn, setSoundOn] = useState(true);
   const [connected, setConnected] = useState(false);
   const [sold, setSold] = useState<{ amount: number; winner: string | null } | null>(null);
@@ -74,7 +75,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
     if (!a || !next?.audioUrl) return;
     a.src = next.audioUrl;
     a.currentTime = 0;
-    setCaption(next.text);
     void a.play().catch(() => {});
   }, []);
 
@@ -119,7 +119,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         case "lot_open":
           setLot(e.lot);
           setBids([]);
-          setCaption("");
           setSold(null);
           setCommitted({});
           queueRef.current = [];
@@ -144,6 +143,9 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         case "agent_leave":
           pushActivity("reject", `${e.label} left — ${e.reason}`);
           break;
+        case "unsold":
+          pushActivity("reject", `Lot ${e.lotId + 1} passed — no bids`);
+          break;
         case "sold":
           setSold({ amount: e.amountMinor, winner: e.winner });
           pushActivity("sold", `SOLD ${formatMinor(e.amountMinor)}${e.winner ? ` to ${e.winner}` : ""}`);
@@ -155,14 +157,13 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
           break;
         case "caption": {
           const line: SpokenLine = { text: e.text, audioUrl: e.audioUrl };
-          if (!soundRef.current || !e.audioUrl) { setCaption(e.text); break; }
+          if (!soundRef.current || !e.audioUrl) break;
           const a = audioRef.current;
-          if (!a) { setCaption(e.text); break; }
+          if (!a) break;
           if (a.paused) {
             queueRef.current = [];
             a.src = e.audioUrl;
             a.currentTime = 0;
-            setCaption(e.text);
             void a.play().catch(() => {});
           } else {
             queueRef.current.push(line);
@@ -216,6 +217,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         <section className="flex flex-col gap-5">
           {/* CENTERED GLASS STAGE — the one bold element */}
           <div className="glass-stage relative flex min-h-[440px] flex-col items-center overflow-hidden px-6 py-7 sm:min-h-[480px]">
+            {!reduce && isLive && <BorderBeam size={90} duration={9} colorFrom="#00a9d6" colorTo="#7fd6ff" borderWidth={2} />}
             <AnimatePresence>
               {sold && (
                 <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
@@ -235,7 +237,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               <span className="text-subtle">{displayLot ? displayLot.title : "waiting for stream"}</span>
             </div>
 
-            <div className="relative my-5 flex items-center justify-center">
+            <div className="relative mb-3 mt-1 flex items-center justify-center">
               <div className={`stage-ring absolute h-[260px] w-[260px] rounded-full sm:h-[290px] sm:w-[290px]`}
                 style={{ background: `conic-gradient(from 0deg, rgba(0,169,214,0.10), rgba(0,169,214,0.55), rgba(120,180,210,0.15))` }} />
               <motion.div
@@ -251,28 +253,17 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               </motion.div>
             </div>
 
-            <div className="text-center">
+            <div className="flex flex-col items-center text-center">
               <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Current bid</div>
-              <div className="mt-1 flex flex-wrap items-baseline justify-center gap-2">
-                <RollingNumber value={formatMinor(current)} className="display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold" />
-                <span className="text-xl text-muted">USDC</span>
-                {phase === "countdown" && (
-                  <motion.span key={snap?.countdown} initial={{ opacity: 0.4, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                    className="ml-2 text-2xl font-semibold text-accent">{snap?.countdown}s</motion.span>
-                )}
-              </div>
-              <div className="mx-auto mt-4 min-h-12 max-w-md border-l-2 border-accent/40 pl-4 text-left text-[15px] leading-relaxed text-muted">
-                <AnimatePresence mode="wait">
-                  {caption ? (
-                    <motion.p key={caption} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{caption}</motion.p>
-                  ) : (
-                    <motion.p key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-subtle">
-                      The auctioneer is getting ready.
-                    </motion.p>
-                  )}
-                </AnimatePresence>
-              </div>
-              {isLive && <div className="mt-2 text-[10px] font-medium tracking-[0.1em] text-accent">BIDDING OPEN</div>}
+              {/* Number owns its own centered line; the unit sits below it, so
+                  the value reads as one locked object instead of drifting. */}
+              <RollingNumber value={formatMinor(current)} className="mt-1 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold" />
+              <div className="mt-1 text-[13px] font-medium uppercase tracking-[0.12em] text-muted">USDC</div>
+              {phase === "countdown" && (
+                <motion.div key={snap?.countdown} initial={{ opacity: 0.4, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                  className="mt-2 text-xl font-semibold text-accent">{snap?.countdown}s</motion.div>
+              )}
+              {isLive && <div className="mt-4 text-[10px] font-medium tracking-[0.1em] text-accent">BIDDING OPEN</div>}
             </div>
           </div>
 
@@ -319,7 +310,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                   const spent = committed[a.id] ?? 0;
                   const pct = Math.min(100, (spent / a.budgetMinor) * 100);
                   return (
-                    <div key={a.id} className="rounded-xl border border-white/70 bg-white/45 p-3">
+                    <MagicCard key={a.id} gradientSize={180} gradientColor="#0d9ec4" className="rounded-xl border border-white/70 bg-white/45 p-3">
                       <div className="flex items-center gap-2">
                         <span className="flex h-6 w-6 items-center justify-center rounded-lg text-xs font-semibold"
                           style={{ background: id.soft, color: id.color }}>{id.glyph}</span>
@@ -342,7 +333,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {a.watchlist.map((w) => <span key={w} className="rounded bg-white/60 px-1.5 py-0.5 text-[10px] text-muted">{w}</span>)}
                       </div>
-                    </div>
+                    </MagicCard>
                   );
                 })}
               </div>

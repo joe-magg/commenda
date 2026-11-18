@@ -95,7 +95,9 @@ export class BidWorkerPool {
     if (!state) return null;
 
     const nextAmount = nextBidAmount(lot.openingMinor, slot);
-    const eligibleIndices = eligibleBidders(state.joined, slot, nextAmount);
+    // Never let the current leader bid again — self-outbids are pointless churn.
+    const eligibleIndices = eligibleBidders(state.joined, slot, nextAmount)
+      .filter((i) => state.joined[i].agent.id !== state.currentBidder);
     const eligible = eligibleIndices.map((i) => state.joined[i]);
 
     if (eligible.length === 0) {

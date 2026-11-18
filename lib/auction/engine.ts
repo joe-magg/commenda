@@ -35,6 +35,7 @@ export type AuctionEvent =
   | { type: "agent_join"; agentId: string; label: string; lotId: number }
   | { type: "agent_leave"; agentId: string; label: string; lotId: number; reason: string }
   | { type: "sold"; lotId: number; amountMinor: number; winner: string | null; txHash?: string }
+  | { type: "unsold"; lotId: number }
   | { type: "caption"; text: string; lineId: string; audioUrl?: string }
   | { type: "voice_warning"; reason: string };
 
@@ -261,13 +262,21 @@ export class AuctionEngine {
 
     const amount = this.state.currentBidMinor;
     const winner = this.state.leaderLabel;
-    let txHash: string | undefined;
-    if (amount > lot.openingMinor && this.hooks.onSold) {
-      try { txHash = await this.hooks.onSold(lot, amount, this.currentChainLotId); } catch { /* settle failure is surfaced in the log */ }
+    const hasBids = amount > lot.openingMinor;
+
+    if (!hasBids) {
+      // No bids: nothing to settle, no SOLD, no receipt — the lot simply passes.
+      this.emit({ type: "unsold", lotId: lot.id });
+      this.emit({ type: "snapshot", state: this.snapshot() });
+    } else {
+      let txHash: string | undefined;
+      if (this.hooks.onSold) {
+        try { txHash = await this.hooks.onSold(lot, amount, this.currentChainLotId); } catch { /* settle failure is surfaced in the log */ }
+      }
+      this.emit({ type: "sold", lotId: lot.id, amountMinor: amount, winner, txHash });
+      this.emit({ type: "snapshot", state: this.snapshot() });
+      this.say("sold", { amountMinor: amount });
     }
-    this.emit({ type: "sold", lotId: lot.id, amountMinor: amount, winner, txHash });
-    this.emit({ type: "snapshot", state: this.snapshot() });
-    this.say("sold", { amountMinor: amount });
 
     const advance = done ?? (() => this.openLot((this.state.lotIndex + 1) % this.lots.length));
     this.later(advance, TIMING.soldMs);

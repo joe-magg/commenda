@@ -33,4 +33,13 @@ describe("worker pool selection", () => {
     const joined = [cap(500_000, { left: true }), cap(1_000_000, { bids: 6 })];
     expect(eligibleBidders(joined, 0, 100_000)).toEqual([]);
   });
+
+  it("never lets the current leader bid against itself", () => {
+    // Mirrors onBidSlot: eligible indices are filtered by the leader id.
+    const ids = ["agent-A", "agent-B"];
+    const joined = [cap(500_000), cap(1_000_000)];
+    const leader = "agent-A";
+    const eligible = eligibleBidders(joined, 0, 100_000).filter((i) => ids[i] !== leader);
+    expect(eligible).toEqual([1]); // only the non-leader may raise
+  });
 });

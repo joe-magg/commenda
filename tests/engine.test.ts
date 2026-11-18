@@ -63,6 +63,17 @@ describe("auction engine state machine", () => {
     expect(events.some((e) => e.type === "sold")).toBe(true);
   });
 
+  it("emits unsold (never sold) when a lot has no bids", async () => {
+    // No onBidSlot hook -> every slot is a no-op, so no bids land.
+    engine.start();
+    await vi.advanceTimersByTimeAsync(
+      TIMING.introMs + TIMING.biddingMs + TIMING.countdownMs + 100,
+    );
+    expect(events.some((e) => e.type === "unsold")).toBe(true);
+    expect(events.some((e) => e.type === "sold")).toBe(false);
+    expect(engine.snapshot().currentBidMinor).toBe(100_000); // opening ask, not a bid
+  });
+
   it("gives each loop of a lot a fresh on-chain id", async () => {
     const ids: number[] = [];
     engine.setHooks({

@@ -82,6 +82,13 @@ export interface DitherFieldProps extends Omit<
    */
   src?: string
   /**
+   * Invert the luminance mapping: dark areas of the source become dense dots
+   * and bright areas become negative space. Use for dark-subject art on a
+   * light field (a ship silhouette, a seal).
+   * @default false
+   */
+  invert?: boolean
+  /**
    * Any CSS colour, including `var(--primary)` and `currentColor`, or a
    * `[low, mid, high]` ramp. One colour fades from 35% to full opacity.
    * @default "currentColor"
@@ -476,6 +483,7 @@ const ease = (from: number, to: number, rate: number, dt: number) =>
 export function DitherField({
   pattern = "horizon",
   src,
+  invert = false,
   color = "currentColor",
   dotSize = 1,
   intensity = 0.75,
@@ -536,7 +544,15 @@ export function DitherField({
       ? createRenderer(
           gl,
           src
-            ? MEDIA_PATTERN
+            ? invert
+              ? // Inverted luminance: dark areas of the source become dense
+                // dots and bright areas become negative space — a dark ship
+                // reads as a navy silhouette instead of a white hole.
+                MEDIA_PATTERN.replace(
+                  "return dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));",
+                  "return 1.0 - dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));",
+                )
+              : MEDIA_PATTERN
             : `float pattern(vec2 p, vec2 size, float t) {${PATTERNS[pattern]}}`
         )
       : null
@@ -772,7 +788,7 @@ export function DitherField({
       gl.getExtension("WEBGL_lose_context")?.loseContext()
       canvas.remove()
     }
-  }, [near, pattern, src, dotSize, contextKey])
+  }, [near, pattern, src, invert, dotSize, contextKey])
 
   useEffect(() => {
     repaint.current()

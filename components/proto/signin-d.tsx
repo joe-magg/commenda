@@ -4,9 +4,9 @@ import { ArrowRight, LogOut } from "lucide-react";
 import { useWalletSignIn } from "@/lib/client/use-wallet-signin";
 import { AgentMark } from "@/components/agent-mark";
 import { BrandLine } from "@/components/brand-line";
+import { CyclingHeadline } from "@/components/cycling-headline";
 import { DitherField } from "@/components/ui/dither-field";
 import { ProgressiveBlur } from "@/components/ui/progressive-blur";
-import { TextAnimate } from "@/components/ui/text-animate";
 import { Marquee } from "@/components/ui/marquee";
 
 export type OrbitAgent = { id: string; label: string };
@@ -20,6 +20,10 @@ export type OrbitAgent = { id: string; label: string };
  *    ink — Geist Mono survives for data (addresses)
  *  - address chip lost its gray fill
  *  - agent chips use generative abstract marks (AgentMark), not letter glyphs
+ *  - headline cycles "…to the auction." → "…to Commenda." (blur out,
+ *    word-by-word blur in); a Commenda logo will replace the nav wordmark
+ *    once generated (prompts in notes/commenda-logo-prompt*.md)
+ *  - the dither background is the user's generated art (DitherField src)
  *  - caption trimmed to "A network of bidding agents"
  */
 export function SignInD({ agents }: { agents: OrbitAgent[] }) {
@@ -31,21 +35,25 @@ export function SignInD({ agents }: { agents: OrbitAgent[] }) {
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#e9f0f5]">
-      {/* Procedural stand-in for the dithered reference image (DitherField src=...) */}
+      {/* The user's generated reference art, dithered live by DitherField —
+          inverted so the dark ship becomes a dense navy silhouette and the
+          bright sky falls away to sparse dots. */}
       <DitherField
-        pattern="clouds"
+        src="/brand/sea-dawn.png"
+        invert
         className="absolute inset-0"
-        color={["#c8e7f4", "#4aa7cf", "#0b3f63"]}
+        color={["#a8d4e8", "#4aa7cf", "#0b3f63"]}
         dotSize={2}
-        intensity={0.6}
-        speed={0.5}
+        intensity={0.85}
+        speed={0.15}
         fps={30}
         interactive={false}
       />
       <ProgressiveBlur className="absolute inset-x-0 top-0 z-[1]" height="22%" position="top" />
       <ProgressiveBlur className="absolute inset-x-0 bottom-0 z-[1]" height="30%" position="bottom" />
-      {/* soft radial scrim so the copy never fights the texture */}
-      <div className="absolute inset-0 z-[1] bg-[radial-gradient(560px_420px_at_50%_52%,rgba(255,255,255,0.85),transparent_70%)]" />
+      {/* soft radial scrim behind the copy only — narrow, so the ship keeps
+          its full tonal range */}
+      <div className="absolute inset-0 z-[1] bg-[radial-gradient(420px_360px_at_50%_55%,rgba(255,255,255,0.9),transparent_70%)]" />
 
       {/* Nav — wordmark only */}
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center px-6 py-5 sm:px-10">
@@ -54,22 +62,13 @@ export function SignInD({ agents }: { agents: OrbitAgent[] }) {
 
       {/* Hero */}
       <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 sm:px-10">
-        <TextAnimate
-          as="h1"
-          by="word"
-          animation="blurInUp"
-          delay={0.1}
-          className="display-type text-center text-[clamp(2.2rem,5vw,3.4rem)] font-bold text-ink"
-        >
-          Send your agent to the auction.
-        </TextAnimate>
+        <CyclingHeadline className="display-type text-center text-[clamp(2.2rem,5vw,3.4rem)] font-bold text-ink" />
 
-        <div className="mt-4">
-          <BrandLine />
+        <div className="mt-5">
+          <BrandLine className="text-[clamp(1.15rem,1.8vw,1.45rem)]" />
         </div>
         <p className="mt-2.5 max-w-lg text-center font-sans text-[15px] leading-relaxed text-ink/90">
-          Thousands of agents compete on the floor in real time — yours bids
-          within the budget you set, escrowed per bid, refunded instantly.
+          Your agent competes on the floor in real time, by your rules.
         </p>
 
         {/* Compact, icon-driven card */}
@@ -93,7 +92,7 @@ export function SignInD({ agents }: { agents: OrbitAgent[] }) {
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <span className="flex-1 pl-1.5 font-mono text-[13px] text-ink">{short}</span>
+              <span className="flex-1 text-center font-mono text-[13px] text-ink">{short}</span>
               <button
                 onClick={signIn}
                 disabled={signing}
@@ -111,7 +110,7 @@ export function SignInD({ agents }: { agents: OrbitAgent[] }) {
               </button>
             </div>
           )}
-          {error && <p className="mt-2 font-sans text-[13px] leading-relaxed text-ink">{error}</p>}
+          {error && <p className="mt-2 text-center font-sans text-[13px] leading-relaxed text-ink">{error}</p>}
         </div>
       </div>
 

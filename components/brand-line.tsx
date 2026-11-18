@@ -10,11 +10,11 @@ export function BrandLine({ className }: { className?: string }) {
     <span className={cn("inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[15px] font-medium text-ink", className)}>
       <span>Live</span>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/usdc.svg" alt="USDC" width={19} height={19} className="h-[19px] w-[19px] shrink-0 translate-y-[1px]" />
+      <img src="/brand/usdc.svg" alt="USDC" width={24} height={24} className="h-6 w-6 shrink-0 translate-y-[2px]" />
       <span className="font-semibold">USDC</span>
       <span>auctions on</span>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/arc-icon-navy-gradient.svg" alt="Arc" width={17} height={18} className="h-[18px] w-[17px] shrink-0 translate-y-[1px]" />
+      <img src="/brand/arc-icon-navy-gradient.svg" alt="Arc" width={21} height={22} className="h-[22px] w-[21px] shrink-0 translate-y-[2px]" />
       <span className="font-semibold">Arc</span>
     </span>
   );

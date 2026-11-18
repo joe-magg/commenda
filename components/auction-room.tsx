@@ -5,9 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { AuctionEvent, EngineSnapshot } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
-import { agentIdentity } from "@/lib/agent-identity";
-import { AgentArena } from "@/components/agent-arena";
 import { AgentMark } from "@/components/agent-mark";
+import { AgentArena } from "@/components/agent-arena";
 import { ArcBadge } from "@/components/arc-badge";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { MagicCard } from "@/components/ui/magic-card";
@@ -262,7 +261,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                 // impossible descending bids.
                 <AnimatePresence initial={false}>
                   {bids.map((b) => {
-                    const id = agentIdentity(b.agentId);
                     return (
                       <motion.div key={b.key} layout
                         initial={{ opacity: 0, scale: 0.96, y: -6 }}
@@ -271,7 +269,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                         transition={{ type: "spring", bounce: 0, duration: 0.3 }}
                         className="mx-auto mb-1.5 w-full">
                         <div className="flex items-center gap-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-xs shadow-sm">
-                          <span className="text-sm" style={{ color: id.color }}>{id.glyph}</span>
+                          <AgentMark id={b.agentId} size={24} />
                           <span className="font-semibold text-ink">{b.label}</span>
                           <span className="tabular ml-auto font-semibold text-accent-deep">{formatMinor(b.amountMinor)}</span>
                         </div>
@@ -303,7 +301,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                   const spent = a.owned ? (committed[a.id] ?? 0) : 0;
                   const pct = a.owned && a.budgetMinor > 0 ? Math.min(100, (spent / a.budgetMinor) * 100) : 0;
                   return (
-                    <MagicCard key={a.id} gradientSize={180} gradientColor="#0d9ec4" className="rounded-xl border border-white/70 bg-white/45 p-3">
+                    <MagicCard key={a.id} gradientSize={180} gradientFrom="#00a9d6" gradientTo="#7fd6ff" className="rounded-xl border border-white/70 bg-white/45 p-3">
                       <div className="flex items-center gap-2">
                         <AgentMark id={a.id} size={26} />
                         <div className="min-w-0">

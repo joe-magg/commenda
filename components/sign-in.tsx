@@ -43,7 +43,7 @@ export function SignIn({ onSuccess }: { onSuccess?: () => void }) {
 
       {/* Hero */}
       <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 sm:px-10">
-        <h1 className="display-type text-center text-[clamp(1.9rem,4.2vw,2.9rem)] font-bold text-ink">
+        <h1 className="display-type text-center text-[clamp(2.2rem,5vw,3.4rem)] font-bold text-ink">
           Send your agent to the auction.
         </h1>
 

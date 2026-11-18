@@ -1,9 +1,11 @@
 /**
  * Pure event reconciliation — applies on-chain escrow events to a mandate's
- * spentMinor. The chain is the source of truth for agent budgets (ESCROW_DESIGN §3).
+ * spentMinor, and derives per-lot leader state from the applied events.
+ * The chain is the source of truth for agent budgets (ESCROW_DESIGN §3).
  *
- * Only mutates `spentMinor`. Never rebuilds the Mandate or touches decide-managed
- * fields (seenKeys, velocity, approvedKeys) — that is `commit()`'s job in the caller.
+ * Only mutates `spentMinor` on the mandate COPIES it returns; it also returns
+ * derived state (per-lot leaders) — it never mutates its inputs, and
+ * callers merge the returned state under their own locks.
  *
  * Idempotency: a cursor (blockNumber, logIndex) plus an ingest set makes replay a
  * no-op. logIndex is unique only within a block, so the pair is required.
@@ -30,6 +32,10 @@ export type ReconcileResult = {
   ingest: IngestState;
   applied: ChainEvent[];
   warnings: string[];
+  /** chainLotId -> current leader, derived from the APPLIED BidPlaced events
+   *  in order, attributed through resolveAddress. Callers merge this into
+   *  state via AuctionState.setLeader (which owns the FIFO cap). */
+  leaders: Map<number, { agentId: string; amountMinor: number }>;
 };
 
 export function eventKeyString(k: EventKey): string {
@@ -125,5 +131,21 @@ export function reconcile(
     ingest: { cursor, seen: nextSeen },
     applied,
     warnings,
+    leaders: deriveLeaders(applied, resolveAddress),
   };
+}
+
+/** Per-lot leader from the applied BidPlaced events, in application order. */
+function deriveLeaders(
+  applied: readonly ChainEvent[],
+  resolveAddress: (address: string) => string,
+): Map<number, { agentId: string; amountMinor: number }> {
+  const leaders = new Map<number, { agentId: string; amountMinor: number }>();
+  for (const ev of applied) {
+    if (ev.kind !== "BidPlaced") continue;
+    const amt = Number(ev.amount);
+    if (!Number.isSafeInteger(amt) || amt <= 0) continue;
+    leaders.set(Number(ev.lotId), { agentId: resolveAddress(ev.bidder.toLowerCase()), amountMinor: amt });
+  }
+  return leaders;
 }

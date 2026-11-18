@@ -11,6 +11,8 @@ export type BidResponse = {
   status: "placed" | "rejected" | "needs_approval" | "busy" | "no_agent" | "pending" | "failed";
   rule?: string;
   txHash?: string;
+  /** Set on 409 busy: when the agent should retry (chained-slot cadence). */
+  retryAfterMs?: number;
 };
 
 /** Map an orchestration result to an HTTP status + a strict DTO (no audit/numbers leak). */
@@ -28,7 +30,9 @@ export function toHttp(result: SubmitResult): { code: number; body: BidResponse 
     case "needs_approval":
       return { code: 409, body: { status: "needs_approval" } };
     case "busy":
-      return { code: 409, body: { status: "busy" } };
+      // Tell the agent when to retry — slots are chained, so one bid is in
+      // flight for ~a few seconds.
+      return { code: 409, body: { status: "busy", retryAfterMs: 1500 } as BidResponse };
     case "no_agent":
       return { code: 403, body: { status: "no_agent" } };
   }

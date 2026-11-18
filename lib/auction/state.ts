@@ -45,6 +45,10 @@ export class AuctionState {
   readonly ingest: IngestState = { cursor: null, seen: new Set() };
   readonly inFlight = new Map<string, InFlightEntry>();
 
+  /** Per-lot current leader, derived from applied BidPlaced events. FIFO-capped. */
+  private readonly lotLeaders = new Map<number, { agentId: string; amountMinor: number }>();
+  private static readonly LOT_LEADER_CAP = 64;
+
   /** One global lock for ALL mandate writes. */
   readonly globalLock = new Mutex();
 
@@ -86,5 +90,20 @@ export class AuctionState {
 
   removeInFlight(bidKey: string): void {
     this.inFlight.delete(bidKey);
+  }
+
+  /** Record the current leader for a lot (FIFO-capped; safe under globalLock). */
+  setLeader(chainLotId: number, agentId: string, amountMinor: number): void {
+    this.lotLeaders.set(chainLotId, { agentId, amountMinor });
+    if (this.lotLeaders.size > AuctionState.LOT_LEADER_CAP) {
+      const oldest = this.lotLeaders.keys().next().value;
+      if (oldest !== undefined) this.lotLeaders.delete(oldest);
+    }
+  }
+
+  /** Leader for a lot, or undefined. Malformed lot ids fail open. */
+  getLeader(chainLotId: number): { agentId: string; amountMinor: number } | undefined {
+    if (!Number.isSafeInteger(chainLotId) || chainLotId < 0) return undefined;
+    return this.lotLeaders.get(chainLotId);
   }
 }

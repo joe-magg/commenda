@@ -29,7 +29,7 @@ const BID = parseAbiItem("event BidPlaced(uint256 indexed lotId, address indexed
 const latest = await client.getBlockNumber();
 const from = latest - BigInt(lookback);
 const logs = await client.getLogs({ address: escrow, event: BID, fromBlock: from, toBlock: "latest" });
-logs.sort((a, b) => (a.blockNumber - b.blockNumber) || (a.logIndex - b.logIndex));
+logs.sort((a, b) => (Number(a.blockNumber - b.blockNumber)) || (a.logIndex - b.logIndex));
 
 const byLot = new Map();
 for (const log of logs) {

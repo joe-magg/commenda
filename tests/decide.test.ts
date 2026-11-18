@@ -113,6 +113,47 @@ describe("decide — idempotency (auditor B2)", () => {
   });
 });
 
+describe("decide — self-outbid guardrail", () => {
+  it("rejects a raise by the agent that already holds the lead", () => {
+    const m = base();
+    const r = decide(bid({ amountMinor: 1_200 }), m, NOW, { currentLeaderAgentId: "agent-1" });
+    expect(r.decision).toEqual({ decision: "REJECT", rule: "SELF_OUTBID" });
+    // no state advance: seenKeys and velocity untouched
+    expect(r.next).toBe(m);
+    expect(r.audit.rule).toBe("SELF_OUTBID");
+    expect(r.audit.detail).toContain("lead");
+  });
+
+  it("falls through to normal rules with no context, null, or another leader", () => {
+    const m = base();
+    expect(decide(bid(), m, NOW).decision).toEqual({ decision: "BID" });
+    expect(decide(bid(), m, NOW, {}).decision).toEqual({ decision: "BID" });
+    expect(decide(bid(), m, NOW, { currentLeaderAgentId: null }).decision).toEqual({ decision: "BID" });
+    expect(decide(bid(), m, NOW, { currentLeaderAgentId: "agent-2" }).decision).toEqual({ decision: "BID" });
+  });
+
+  it("placement pin: a leader replaying the identical key is IDEMPOTENCY, not SELF_OUTBID", () => {
+    const m = base({ seenKeys: new Set([bidKey("agent-1", bid())]) });
+    const r = decide(bid(), m, NOW, { currentLeaderAgentId: "agent-1" });
+    expect(r.decision.decision).toBe("REJECT");
+    expect((r.decision as { rule: string }).rule).toBe("IDEMPOTENCY");
+  });
+
+  it("order pin: SELF_OUTBID fires before BUDGET and PER_BID_CAP", () => {
+    const m = base({ perBidCapMinor: 500, budgetMinor: 100 });
+    const r = decide(bid({ amountMinor: 1_200 }), m, NOW, { currentLeaderAgentId: "agent-1" });
+    expect((r.decision as { rule: string }).rule).toBe("SELF_OUTBID");
+  });
+
+  it("context is lot-scoped by the caller: no context means a normal bid", () => {
+    // submitBid looks up the leader for THIS bid's lot only and fails open on
+    // malformed ids — so the same agent bidding on a different lot arrives
+    // with a null/different context and flows through the normal rules.
+    const m = base();
+    expect(decide(bid({ lotId: "lot-2" }), m, NOW).decision).toEqual({ decision: "BID" });
+  });
+});
+
 describe("decide — aggregate & state (auditor B3)", () => {
   it("two bids each under the per-bid cap cannot overspend the budget", () => {
     const m = base({ budgetMinor: 1_500, perBidCapMinor: 1_000 });

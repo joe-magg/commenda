@@ -19,9 +19,12 @@ export type EngineSnapshot = {
   lotIndex: number;
   totalLots: number;
   lot: Lot | null;
+  chainLotId: number; // on-chain lot id for the current visit
   currentBidMinor: number;
   leaderLabel: string | null;
   countdown: number;
+  /** Epoch ms when the current phase is scheduled to end (best estimate). */
+  phaseEndsAt: number;
 };
 
 export type AuctionEvent =
@@ -75,9 +78,11 @@ export class AuctionEngine {
     lotIndex: 0,
     totalLots: LOTS.length,
     lot: null,
+    chainLotId: 0,
     currentBidMinor: 0,
     leaderLabel: null,
     countdown: 0,
+    phaseEndsAt: 0,
   };
   private listeners = new Set<(e: AuctionEvent) => void>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -185,9 +190,11 @@ export class AuctionEngine {
       phase: "intro",
       lotIndex: index,
       lot,
+      chainLotId: this.currentChainLotId,
       currentBidMinor: lot.openingMinor,
       leaderLabel: null,
       countdown: 0,
+      phaseEndsAt: Date.now() + TIMING.introMs,
     };
     this.emit({ type: "phase", phase: "intro" });
     this.emit({ type: "lot_open", lot, index, total: this.lots.length });
@@ -198,7 +205,7 @@ export class AuctionEngine {
   }
 
   private beginBidding(lot: Lot): void {
-    this.state = { ...this.state, phase: "bidding" };
+    this.state = { ...this.state, phase: "bidding", phaseEndsAt: Date.now() + TIMING.biddingMs };
     this.emit({ type: "phase", phase: "bidding" });
     this.emit({ type: "snapshot", state: this.snapshot() });
     this.phaseStart = Date.now();
@@ -281,7 +288,7 @@ export class AuctionEngine {
   }
 
   private beginCountdown(lot: Lot): void {
-    this.state = { ...this.state, phase: "countdown", countdown: 5 };
+    this.state = { ...this.state, phase: "countdown", countdown: 5, phaseEndsAt: Date.now() + TIMING.countdownMs };
     this.emit({ type: "phase", phase: "countdown" });
     this.say("countdown", { s: 5 });
     for (let s = 5; s >= 1; s--) {
@@ -296,7 +303,7 @@ export class AuctionEngine {
 
   private async finishLot(lot: Lot, done?: () => void): Promise<void> {
     if (this.state.phase === "sold") { done?.(); return; }
-    this.state = { ...this.state, phase: "sold", countdown: 0 };
+    this.state = { ...this.state, phase: "sold", countdown: 0, phaseEndsAt: Date.now() + TIMING.soldMs };
     this.emit({ type: "phase", phase: "sold" });
 
     const amount = this.state.currentBidMinor;

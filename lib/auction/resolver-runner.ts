@@ -46,12 +46,13 @@ export function startResolver(): () => void {
           // writes: policy from current, decide-managed from next, credits kept.
           const cur = state.getMandate(entry.agentId);
           state.setMandate(entry.agentId, mergeCommittedNext(cur, entry.next, entry.bid));
-          // Then credit EVERY affected mandate with the new events.
+          // Then credit EVERY affected mandate and update the leader map.
           const all = new Map(state.mandates);
           const r = reconcile(all, state.ingest, outcome.events, (addr) =>
             state.addressToAgent.get(addr.toLowerCase()) ?? addr.toLowerCase(),
           );
           for (const [id, m] of r.mandates) state.setMandate(id, m);
+          for (const [lotId, leader] of r.leaders) state.setLeader(lotId, leader.agentId, leader.amountMinor);
           state.ingest.cursor = r.ingest.cursor;
           state.ingest.seen = r.ingest.seen;
         }

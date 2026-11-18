@@ -127,6 +127,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
         : dto.status === "no_agent" ? "no_agent"
         : "failed",
       rule: dto.rule,
+      source: "server",
       msServer: Date.now() - start,
     });
   }

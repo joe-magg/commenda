@@ -24,6 +24,7 @@ export type RuleCode =
   | "INVALID_BID"
   | "INVALID_MANDATE"
   | "IDEMPOTENCY"
+  | "SELF_OUTBID"
   | "PER_BID_CAP"
   | "BUDGET"
   | "VELOCITY"
@@ -154,7 +155,15 @@ function makeAudit(
   };
 }
 
-export function decide(bid: Bid, m: Mandate, nowMs: number): DecideResult {
+export type DecideContext = {
+  /** The agent that currently holds the lead on bid.lotId, when known.
+   *  Derived from applied BidPlaced events (chain truth as of the last
+   *  sync). Stale by at most one sync window — a leader who was JUST
+   *  outbid may be rejected once; the retry lands after a fresh sync. */
+  currentLeaderAgentId?: string | null;
+};
+
+export function decide(bid: Bid, m: Mandate, nowMs: number, context?: DecideContext): DecideResult {
   // Rule 0 — kill switch, before everything else.
   if (m.killSwitch) {
     return reject("KILL_SWITCH", "agent kill switch is engaged", bid, m, nowMs);
@@ -191,6 +200,18 @@ export function decide(bid: Bid, m: Mandate, nowMs: number): DecideResult {
   // Rule 1 — idempotency: never two identical (agent, lot, amount) submissions.
   if (m.seenKeys.has(key)) {
     return reject("IDEMPOTENCY", `key ${key} already submitted`, bid, m, nowMs);
+  }
+
+  // Rule 1b — self-outbid: the agent already holds the lead on this lot. The
+  // escrow nets a self-raise internally (two transfers + gas) to no effect —
+  // pure fee/gas waste. Placed AFTER idempotency so replays stay
+  // IDEMPOTENCY forever (the leader map is mutable context; replay
+  // determinism wins).
+  if (
+    context?.currentLeaderAgentId != null &&
+    context.currentLeaderAgentId === m.agentId
+  ) {
+    return reject("SELF_OUTBID", "agent already holds the lead on this lot", bid, m, nowMs);
   }
 
   // Rule 2 — per-bid cap.

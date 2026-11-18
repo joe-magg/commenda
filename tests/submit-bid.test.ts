@@ -151,6 +151,56 @@ describe("submitBid", () => {
   });
 });
 
+describe("submitBid — self-outbid guardrail integration", () => {
+  const leaderEvent = {
+    kind: "BidPlaced" as const, lotId: 1n, bidder: "agent-1", amount: 500_000n,
+    prevBidder: "0x0000000000000000000000000000000000000000", prevAmount: 0n, seller: "seller-ok",
+    key: { blockNumber: 10n, logIndex: 0 },
+  };
+
+  it("rejects a leader's raise without submitting (chain-truth leader map)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    s.addressToAgent.set("agent-1", "agent-1");
+    const r = await submitBid(
+      s,
+      { ...bid, lotId: "1" },
+      deps(fakeChain({ syncEvents: async () => ({ events: [leaderEvent], latestBlock: 100n }) })),
+    );
+    expect(r.status).toBe("rejected");
+    expect(r.status === "rejected" && r.rule).toBe("SELF_OUTBID");
+    expect(s.inFlight.size).toBe(0);
+    expect(s.getLeader(1)).toMatchObject({ agentId: "agent-1", amountMinor: 500_000 });
+  });
+
+  it("fails open on an unknown external bidder", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const ext = { ...leaderEvent, bidder: "0xexternal0000000000000000000000000000000" };
+    const r = await submitBid(s, bid, deps(fakeChain({ syncEvents: async () => ({ events: [ext], latestBlock: 100n }) })));
+    expect(r.status).toBe("placed");
+  });
+
+  it("fails open on a malformed lotId string", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    s.setLeader(1, "agent-1", 500_000);
+    const r = await submitBid(s, { ...bid, lotId: "not-a-number" }, deps(fakeChain()));
+    expect(r.status).toBe("placed");
+  });
+
+  it("the leader may bid again once outbid (leader map updated by the outbid event)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    s.addressToAgent.set("agent-1", "agent-1");
+    const outbid = { ...leaderEvent, bidder: "agent-2", amount: 600_000n };
+    const chain = fakeChain({ syncEvents: async () => ({ events: [outbid], latestBlock: 100n }) });
+    const r = await submitBid(s, bid, deps(chain));
+    expect(r.status).toBe("placed");
+    expect(s.getLeader(1)).toMatchObject({ agentId: "agent-2", amountMinor: 600_000 });
+  });
+});
+
 describe("commit", () => {
   it("applies event credits to the CURRENT mandate, preserving decide-managed state", async () => {
     const s = new AuctionState();

@@ -6,7 +6,6 @@
 import { decide, bidKey, type AuditEntry, type Bid, type Decision, type Mandate } from "./decide";
 import { reconcile, type ChainEvent } from "./reconcile";
 import { AuctionState, type InFlightEntry } from "./state";
-
 export type ChainPort = {
   /** Fetch escrow events from a block (RPC — called OUTSIDE the global lock). */
   syncEvents: (fromBlock?: bigint) => Promise<{ events: ChainEvent[]; latestBlock: bigint }>;
@@ -72,6 +71,7 @@ export async function commit(
     if (updated) state.setMandate(agentId, updated);
     state.ingest.cursor = r.ingest.cursor;
     state.ingest.seen = r.ingest.seen;
+    for (const [lotId, leader] of r.leaders) state.setLeader(lotId, leader.agentId, leader.amountMinor);
   });
 }
 
@@ -94,8 +94,12 @@ export async function submitBid(
     await commit(state, agentId, events);
     const fresh = state.getMandate(agentId)!;
 
-    // 2. Decide against a fresh, authoritative mandate.
-    const result = decide(bid, fresh, deps.now());
+    // 2. Decide against a fresh, authoritative mandate. The leader map is
+    // chain truth as of the sync we just did — an agent that already holds
+    // the lead may not raise against itself (the escrow would net it, at
+    // pure fee/gas waste). Malformed lot ids fail open (getLeader gates).
+    const leader = state.getLeader(Number.isSafeInteger(Number(bid.lotId)) ? Number(bid.lotId) : NaN);
+    const result = decide(bid, fresh, deps.now(), { currentLeaderAgentId: leader?.agentId ?? null });
     // Persist the decision audit for ALL branches — never discard it (audit finding 3).
     try { deps.onDecision?.(result.audit); } catch { /* audit must never break bidding */ }
     if (result.decision.decision === "REJECT") {

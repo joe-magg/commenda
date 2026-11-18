@@ -151,6 +151,7 @@ export class BidWorkerPool {
       amountMinor: nextAmount,
       status: "rejected",
       rule: result.ok ? undefined : result.rule,
+      source: "client",
       msClient: Date.now() - startedAt,
     };
     if (result.ok) {

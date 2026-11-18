@@ -19,6 +19,8 @@ export type TraceEvent =
       amountMinor: number;
       status: "placed" | "pending" | "failed" | "rejected" | "needs_approval" | "busy" | "no_agent";
       rule?: string;
+      /** Which side recorded it — the same bid is seen twice (pool + route). */
+      source: "client" | "server";
       msClient?: number; // bidder-side total (x402 verify+settle+bid) when known
       msServer?: number; // bids-route handler total when known
     };
@@ -58,21 +60,67 @@ function percentile(sorted: number[], p: number): number {
   return sorted[i];
 }
 
+type Outcome = Extract<TraceEvent, { kind: "bid_outcome" }>;
+
+/**
+ * Merge the two views of the same bid: the pool records the outcome with
+ * client latency; the bids route records the same bid with handler latency
+ * (usually slightly earlier). A server record within 3s of a client record
+ * with the same (agent, lot, amount, status) is the SAME logical bid — fold
+ * msServer in and drop the duplicate, otherwise the self-outbid detector
+ * counts every demo bid twice. Unmatched server records are real bids from
+ * agents outside the pool and stay in the analysis.
+ */
+function foldServerViews(events: TraceEvent[]): Outcome[] {
+  const outcomes = events.filter((e): e is Outcome => e.kind === "bid_outcome");
+  const consumed = new Set<number>();
+  const merged: Outcome[] = [];
+  for (const c of outcomes) {
+    if (c.source !== "client") continue;
+    const si = outcomes.findIndex(
+      (s, i) =>
+        !consumed.has(i) &&
+        s.source === "server" &&
+        s.agentId === c.agentId &&
+        s.chainLotId === c.chainLotId &&
+        s.amountMinor === c.amountMinor &&
+        s.status === c.status &&
+        Math.abs(s.at - c.at) <= 3000,
+    );
+    if (si >= 0) {
+      consumed.add(si);
+      merged.push({ ...c, msServer: outcomes[si].msServer ?? c.msServer, rule: c.rule ?? outcomes[si].rule });
+    } else {
+      merged.push(c);
+    }
+  }
+  outcomes.forEach((s, i) => {
+    if (s.source === "server" && !consumed.has(i)) merged.push(s);
+  });
+  return merged;
+}
+
 export function analyze(input: TraceEvent[] = snapshot()): TraceAnalysis {
+  const outcomes = foldServerViews(input);
   const counts: Record<string, number> = {};
-  for (const e of input) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
-
-  const clientMs = input
-    .flatMap((e) => (e.kind === "bid_outcome" && e.msClient != null ? [e.msClient] : []))
-    .sort((a, b) => a - b);
-  const serverMs = input
-    .flatMap((e) => (e.kind === "bid_outcome" && e.msServer != null ? [e.msServer] : []))
-    .sort((a, b) => a - b);
-
-  // Successful-bid sequence per lot, in arrival order.
-  const perLot = new Map<number, { agentId: string; amountMinor: number; at: number }[]>();
   for (const e of input) {
-    if (e.kind !== "bid_outcome" || (e.status !== "placed" && e.status !== "pending")) continue;
+    if (e.kind !== "bid_outcome") counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+  }
+  counts["bid_outcome"] = outcomes.length;
+
+  const clientMs = outcomes
+    .flatMap((e) => (e.msClient != null ? [e.msClient] : []))
+    .sort((a, b) => a - b);
+  const serverMs = outcomes
+    .flatMap((e) => (e.msServer != null ? [e.msServer] : []))
+    .sort((a, b) => a - b);
+
+  // Successful-bid sequence per lot, in arrival order. Only "placed":
+  // pending outcomes no longer claim leadership (bidder.ts), so counting
+  // them here would fabricate self-outbid pairs.
+  const perLot = new Map<number, { agentId: string; amountMinor: number; at: number }[]>();
+  for (const e of outcomes) {
+    if (e.status !== "placed") continue;
     const list = perLot.get(e.chainLotId) ?? [];
     list.push({ agentId: e.agentId, amountMinor: e.amountMinor, at: e.at });
     perLot.set(e.chainLotId, list);
@@ -91,8 +139,7 @@ export function analyze(input: TraceEvent[] = snapshot()): TraceAnalysis {
 
   const churn = new Map<number, { failed: number; rejected: number; busy: number }>();
   const lots = new Map<number, { attempts: number; placed: number; pending: number; failed: number }>();
-  for (const e of input) {
-    if (e.kind !== "bid_outcome") continue;
+  for (const e of outcomes) {
     const c = churn.get(e.chainLotId) ?? { failed: 0, rejected: 0, busy: 0 };
     if (e.status === "failed") c.failed++;
     if (e.status === "rejected") c.rejected++;

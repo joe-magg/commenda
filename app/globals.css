@@ -7,6 +7,9 @@
    All values live here; components reference tokens, never raw hex. */
 @theme inline {
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Tailwind `font-sans` = Satoshi — the UI face for small text. Geist remains
+     the display/body default via the body rule below. */
+  --font-sans: var(--font-satoshi), var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --color-bg: #eef2f5;
   --color-ink: #14171a;
   --color-muted: #55606a;

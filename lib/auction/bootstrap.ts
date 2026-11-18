@@ -9,6 +9,8 @@ import { startResolver } from "./resolver-runner";
 import { speak } from "@/lib/voice/synth";
 import { createClaim, listSessions } from "@/lib/db/repo";
 import { itemsToLots, type GeneratedItem } from "@/lib/items/generator";
+import { buildReceiptUri } from "@/lib/items/art-uri";
+import { mintReceipt } from "./receipt-chain";
 
 const g = globalThis as typeof globalThis & {
   __commendaResolver?: () => void;
@@ -44,6 +46,19 @@ export function ensureBootstrapped(): void {
           amountMinor: amount,
           settleTx: tx || null,
         });
+        // Soulbound receipt — best effort: a mint failure must not stall the show.
+        if (process.env.RECEIPT_NFT_ADDRESS) {
+          try {
+            const uri = buildReceiptUri(
+              { title: lot.title, sku: lot.sku, amountMinor: amount, artSeed: lot.artSeed },
+              winner,
+            );
+            const mint = await mintReceipt(chainLotId, winner, uri);
+            console.info("[commenda:receipt] minted", JSON.stringify({ lot: chainLotId, tokenId: mint.tokenId, winner }));
+          } catch (e) {
+            console.warn("[commenda:receipt] mint failed", e instanceof Error ? e.message.slice(0, 120) : e);
+          }
+        }
       }
       pool.onLotEnd(chainLotId);
       return tx;

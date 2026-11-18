@@ -30,6 +30,18 @@ type Session = {
   status: string;
   catalog: { id: number; title: string; category: string; openingMinor: number; sku: string; artSeed: string }[];
 };
+type OnChainReceipt = { tokenId: number; uri: string; owner: string };
+type DecodedReceipt = {
+  name: string;
+  description: string;
+  image: string;
+  attributes: { trait_type: string; value: string }[];
+};
+
+function decodeReceipt(uri: string): DecodedReceipt | null {
+  try { return JSON.parse(atob(uri.split(",")[1] ?? "")) as DecodedReceipt; } catch { return null; }
+}
+
 type Claim = {
   id: string;
   winnerId: string | null;
@@ -47,6 +59,7 @@ export function AgentDashboard({ userName }: { userName: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
+  const [receipts, setReceipts] = useState<OnChainReceipt[]>([]);
   const [ownerId, setOwnerId] = useState<string>("");
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,14 +74,16 @@ export function AgentDashboard({ userName }: { userName: string }) {
   });
 
   const refresh = useCallback(async () => {
-    const [u, s, c] = await Promise.all([
+    const [u, s, c, r] = await Promise.all([
       fetch("/api/users").then((r) => r.json()),
       fetch("/api/sessions").then((r) => r.json()),
       fetch("/api/claims").then((r) => r.json()),
+      fetch("/api/receipts").then((r) => r.json()),
     ]);
     setUsers(u.users);
     setSessions(s.sessions);
     setClaims(c.claims);
+    setReceipts(r.receipts ?? []);
     setOwnerId((cur) => cur || u.users[0]?.id || "");
     const a = await fetch(`/api/agents?owner=${encodeURIComponent(ownerId || u.users[0]?.id || "")}`).then((r) => r.json());
     setAgents(a.agents);
@@ -294,6 +309,27 @@ export function AgentDashboard({ userName }: { userName: string }) {
               </div>
             ))}
           </div>
+          {receipts.length > 0 && (
+            <div className="card p-5">
+              <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">On-chain receipts</h2>
+              <div className="grid grid-cols-2 gap-3">
+                {receipts.map((r) => {
+                  const d = decodeReceipt(r.uri);
+                  return (
+                    <div key={r.tokenId} className="rounded-xl border border-white/70 bg-white/45 p-2">
+                      {d?.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={d.image} alt={d.name} className="w-full rounded-lg" />
+                      )}
+                      <div className="mt-2 truncate text-[11px] font-semibold text-ink">{d?.name ?? `Receipt #${r.tokenId}`}</div>
+                      <div className="font-mono text-[9px] text-subtle">soulbound · #{r.tokenId}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="card p-5">
             <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">Your wins</h2>
             {myClaims.length === 0 ? (

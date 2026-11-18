@@ -16,11 +16,10 @@ import { ShimmerButton } from "@/components/ui/shimmer-button";
  *    flashy-but-on-theme CTA from the installed library.
  */
 export function SignInD() {
-  const { address, isConnected, connectors, connectAndSignIn, signIn, disconnect, connecting, signing, error } =
+  const { address, isConnected, connectAndSignIn, signIn, disconnect, connecting, signing, error } =
     useWalletSignIn();
 
   const short = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "";
-  const connector = connectors[0];
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#e9f0f5]">

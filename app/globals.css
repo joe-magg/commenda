@@ -1,9 +1,12 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 /* Liquid-glass system: Apple-style smoothness translated for the web.
    Mostly neutral, one saturated cyan accent. No red anywhere.
    All values live here; components reference tokens, never raw hex. */
 @theme inline {
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --color-bg: #eef2f5;
   --color-ink: #14171a;
   --color-muted: #55606a;
@@ -20,7 +23,93 @@
   --glass-border: 1px solid rgba(255, 255, 255, 0.85);
   --glass-inner: inset 0 1px 1px rgba(255, 255, 255, 0.95), inset 0 -14px 26px rgba(20, 70, 95, 0.12);
   --glass-shadow: 0 1px 1px rgba(255, 255, 255, 0.7) inset, 0 12px 40px rgba(20, 50, 70, 0.13), 0 2px 8px rgba(20, 50, 70, 0.06);
-}
+  --animate-orbit: orbit calc(var(--duration)*1s) linear infinite;
+  --animate-shine: shine var(--duration) infinite linear;
+  --animate-shiny-text: shiny-text 8s infinite;
+  --animate-shimmer-slide: shimmer-slide var(--speed) ease-in-out infinite alternate;
+  --animate-spin-around: spin-around calc(var(--speed) * 2) infinite linear;
+  --animate-aurora: aurora 8s ease-in-out infinite alternate;
+  @keyframes orbit {
+  0% {
+    transform: rotate(calc(var(--angle) * 1deg)) translateY(calc(var(--radius) * 1px)) rotate(calc(var(--angle) * -1deg));
+    }
+  100% {
+    transform: rotate(calc(var(--angle) * 1deg + 360deg)) translateY(calc(var(--radius) * 1px)) rotate(calc((var(--angle) * -1deg) - 360deg));
+    }
+  }
+  @keyframes shine {
+  0% {
+    background-position: 0% 0%;
+    }
+  50% {
+    background-position: 100% 100%;
+    }
+  to {
+    background-position: 0% 0%;
+    }
+  }
+  @keyframes shiny-text {
+  0%, 90%, 100% {
+    background-position: calc(-100% - var(--shiny-width)) 0;
+    }
+  30%, 60% {
+    background-position: calc(100% + var(--shiny-width)) 0;
+    }
+  }
+  @keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+    }
+  }
+  @keyframes spin-around {
+  0% {
+    transform: translateZ(0) rotate(0);
+    }
+  15%, 35% {
+    transform: translateZ(0) rotate(90deg);
+    }
+  65%, 85% {
+    transform: translateZ(0) rotate(270deg);
+    }
+  100% {
+    transform: translateZ(0) rotate(360deg);
+    }
+  }
+  @keyframes aurora {
+  0% {
+    background-position: 0% 50%;
+    transform: rotate(-5deg) scale(0.9);
+    }
+  25% {
+    background-position: 50% 100%;
+    transform: rotate(5deg) scale(1.1);
+    }
+  50% {
+    background-position: 100% 50%;
+    transform: rotate(-3deg) scale(0.95);
+    }
+  75% {
+    background-position: 50% 0%;
+    transform: rotate(3deg) scale(1.05);
+    }
+  100% {
+    background-position: 0% 50%;
+    transform: rotate(-5deg) scale(0.9);
+    }
+  }
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite
+;
+  @keyframes marquee {
+  from {
+    transform: translateX(0);}
+  to {
+    transform: translateX(calc(-100% - var(--gap)));}}
+  @keyframes marquee-vertical {
+  from {
+    transform: translateY(0);}
+  to {
+    transform: translateY(calc(-100% - var(--gap)));}}}
 
 html,
 body {

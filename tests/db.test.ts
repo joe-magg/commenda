@@ -18,7 +18,9 @@ describe("agent registry (SQLite)", () => {
     expect(repo.listUsers().length).toBe(3);
     const agents = repo.listAgents();
     expect(agents.length).toBe(8);
-    expect(agents.filter((a) => a.enabled).length).toBe(2);
+    // Liveness is derived from AGENT_KEYS; in the test env there are no keys,
+    // so all agents seed as standby (kill-switched) — never a hardcoded count.
+    expect(agents.filter((a) => a.enabled).length).toBe(0);
     expect(agents[0].policy.watchlist.length).toBeGreaterThan(0);
     expect(repo.listSessions()[0].catalog.length).toBe(6);
   });

@@ -86,10 +86,11 @@ function seed(d: DatabaseSync): void {
     "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const owners = ["demo-you", "demo-you", "demo-maya", "demo-maya", "demo-theo", "demo-theo", "demo-you", "demo-maya"];
+  // An agent is live if it has a signing key in AGENT_KEYS, not by its position.
+  let keys: Record<string, string> = {};
+  try { keys = JSON.parse(process.env.AGENT_KEYS ?? "{}"); } catch { /* none */ }
   agentConfigRaw.forEach((c, i) => {
-    const live = i < 2;
-    // Only funded agents have a wallet address; the rest are standby with no
-    // signing key, which the dashboard reports honestly.
+    const live = typeof keys[c.id] === "string" && /^0x[a-f0-9]{64}$/i.test(keys[c.id]);
     insertAgent.run(c.id, owners[i], `Agent ${String.fromCharCode(65 + i)}`, live ? c.payer : null, live ? 1 : 0, live ? "bidding" : "standby", now);
     insertPolicy.run(
       c.id,

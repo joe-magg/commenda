@@ -2,6 +2,9 @@
 notes/
 docs/
 
+# Agent-facing guides belong in notes/ (gitignored)
+/WALLET_LOGIN.md
+
 # AI agent config — installed skills are restored via skills-lock.json
 .agents/
 .opencode/

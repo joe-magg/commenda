@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { formatMinor } from "@/lib/auction/lots";
 import { ItemArt } from "@/components/item-art";
+import { AgentMark } from "@/components/agent-mark";
 import { artSeedFor } from "@/lib/items/generator";
 
 const HoloCard = dynamic(() => import("@/components/HoloCard"), { ssr: false });
@@ -57,11 +58,15 @@ type Claim = {
 
 const CATEGORIES = ["electronics", "art", "collectibles"];
 
+type AuditEvent = { at: number; agentId: string | null; label: string | null; kind: string; detail: string };
+
 export function AgentDashboard({ userName }: { userName: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [receipts, setReceipts] = useState<OnChainReceipt[]>([]);
+  const [audit, setAudit] = useState<{ events: AuditEvent[]; counts: Record<string, number> }>({ events: [], counts: {} });
+  const [auditFilter, setAuditFilter] = useState<"all" | "decisions" | "guardrails" | "lifecycle">("all");
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
@@ -75,14 +80,16 @@ export function AgentDashboard({ userName }: { userName: string }) {
   });
 
   const refresh = useCallback(async () => {
-    const [s, c, r] = await Promise.all([
+    const [s, c, r, auditRes] = await Promise.all([
       fetch("/api/sessions").then((r) => r.json()),
       fetch("/api/claims").then((r) => r.json()),
       fetch("/api/receipts").then((r) => r.json()),
+      fetch("/api/audit?limit=120").then((r) => (r.ok ? r.json() : { events: [], counts: {} })),
     ]);
     setSessions(s.sessions);
     setClaims(c.claims);
     setReceipts(r.receipts ?? []);
+    setAudit(auditRes);
     // Server scopes agents to the session user; no client-supplied owner.
     const a = await fetch("/api/agents").then((r) => r.json());
     setAgents(a.agents ?? []);
@@ -274,6 +281,8 @@ export function AgentDashboard({ userName }: { userName: string }) {
               </div>
             )}
           </div>
+
+          <AuditTrail audit={audit} filter={auditFilter} setFilter={setAuditFilter} />
         </section>
 
         <aside className="flex flex-col gap-5">
@@ -377,5 +386,112 @@ export function AgentDashboard({ userName }: { userName: string }) {
         </aside>
       </div>
     </main>
+  );
+}
+
+/** Kind → display group for the audit trail. */
+function auditGroup(kind: string): "decision" | "guardrail" | "lifecycle" {
+  if (kind.startsWith("bid_")) {
+    const rule = kind.slice(4).toUpperCase();
+    return rule === "BID" ? "decision" : "guardrail";
+  }
+  return "lifecycle";
+}
+
+function auditBadge(kind: string): { text: string; cls: string } {
+  const group = auditGroup(kind);
+  if (group === "decision") return { text: "BID", cls: "border-accent/30 bg-accent/10 text-accent-deep" };
+  if (group === "guardrail") {
+    const rule = kind.slice(4).toUpperCase().replace(/_/g, " ");
+    return { text: rule, cls: "border-ink/15 bg-ink/5 text-ink" };
+  }
+  return { text: kind.replace(/_/g, " ").toUpperCase(), cls: "border-win/30 bg-win/10 text-win" };
+}
+
+function timeAgo(at: number): string {
+  const s = Math.max(1, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.round(m / 60)}h ago`;
+}
+
+/**
+ * The decision log: every guardrail call, in order, with the rule that fired.
+ * This is the "AI recommends, code enforces" architecture made visible.
+ */
+function AuditTrail({
+  audit,
+  filter,
+  setFilter,
+}: {
+  audit: { events: AuditEvent[]; counts: Record<string, number> };
+  filter: "all" | "decisions" | "guardrails" | "lifecycle";
+  setFilter: (f: "all" | "decisions" | "guardrails" | "lifecycle") => void;
+}) {
+  const events = audit.events.filter((e) => {
+    const g = auditGroup(e.kind);
+    if (filter === "decisions") return g === "decision";
+    if (filter === "guardrails") return g === "guardrail";
+    if (filter === "lifecycle") return g === "lifecycle";
+    return true;
+  });
+
+  const filters = [
+    { key: "all" as const, label: "All", n: audit.events.length },
+    { key: "decisions" as const, label: "Bids", n: audit.counts["decision:BID"] ?? 0 },
+    {
+      key: "guardrails" as const,
+      label: "Guardrails",
+      n: Object.entries(audit.counts).filter(([k]) => k.startsWith("decision:") && k !== "decision:BID").reduce((s, [, v]) => s + v, 0),
+    },
+    { key: "lifecycle" as const, label: "Lifecycle", n: Object.entries(audit.counts).filter(([k]) => !k.startsWith("decision:")).reduce((s, [, v]) => s + v, 0) },
+  ];
+
+  return (
+    <div className="card p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted">Decision log</h2>
+        <div className="flex gap-1 rounded-xl bg-white/45 p-1">
+          {filters.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`rounded-lg px-2.5 py-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em] transition-transform active:scale-[0.97] ${filter === f.key ? "bg-white text-ink shadow-sm" : "text-muted"}`}
+            >
+              {f.label} <span className="text-subtle">{f.n}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {events.length === 0 ? (
+        <p className="py-6 text-sm text-subtle">No decisions yet. They appear here the moment an agent bids.</p>
+      ) : (
+        <div className="flex max-h-[420px] flex-col gap-1 overflow-y-auto pr-1">
+          {events.map((e, i) => {
+            const badge = auditBadge(e.kind);
+            return (
+              <div key={`${e.at}-${i}`} className="flex items-center gap-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2">
+                {e.agentId && e.label ? (
+                  <AgentMark id={e.agentId} size={26} />
+                ) : (
+                  <span className="flex h-[26px] w-[26px] items-center justify-center rounded-full border border-black/[0.06] bg-white text-[11px] text-subtle">·</span>
+                )}
+                <span className={`shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[9px] font-medium tracking-[0.06em] ${badge.cls}`}>
+                  {badge.text}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">{e.detail || "—"}</span>
+                <span className="shrink-0 font-mono text-[10px] text-subtle">{timeAgo(e.at)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-3 text-[11px] leading-relaxed text-muted">
+        Every bid a decision engine approved or blocked — with the exact rule.
+        The model never moves money; this log is the proof.
+      </p>
+    </div>
   );
 }

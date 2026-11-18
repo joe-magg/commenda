@@ -1,133 +1,100 @@
 "use client";
 
-import { useState } from "react";
-import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
-import dynamic from "next/dynamic";
-import { motion, useReducedMotion } from "motion/react";
+import { LogOut } from "lucide-react";
+import { useWalletSignIn } from "@/lib/client/use-wallet-signin";
+import { BrandLine } from "@/components/brand-line";
+import { DitherField } from "@/components/ui/dither-field";
+import { ProgressiveBlur } from "@/components/ui/progressive-blur";
+import { ShimmerButton } from "@/components/ui/shimmer-button";
 
-const SeaScene = dynamic(() => import("@/components/sea-scene").then((m) => m.SeaScene), { ssr: false });
-
+/**
+ * Sign-in — the winning prototype (D, "the network"), promoted to production.
+ * The generated reference art, dithered live (inverted luminance: the dark
+ * ship is a dense navy silhouette). ONE button: connect → sign → enter,
+ * fully automatic. Signed-in members are redirected to the dashboard by the
+ * page, so this screen always starts from zero.
+ */
 export function SignIn({ onSuccess }: { onSuccess?: () => void }) {
-  const { address, isConnected } = useAccount();
-  const { connectors, connect, isPending: connecting } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { signMessageAsync, isPending: signing } = useSignMessage();
-  const [error, setError] = useState("");
-  const reduce = useReducedMotion();
+  const { address, isConnected, connectAndSignIn, signIn, disconnect, connecting, signing, error } =
+    useWalletSignIn(onSuccess);
 
-  const signIn = async () => {
-    if (!address) return;
-    setError("");
-    try {
-      const signature = await signMessageAsync({
-        message: "Sign in to Commenda. This is a free demo signature with no transaction.",
-      });
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ address, signature }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setError(d.error ?? "Sign-in failed — try again.");
-        return;
-      }
-      onSuccess?.();
-      window.location.reload();
-    } catch {
-      setError("Signature request was declined.");
-    }
-  };
-
-  const friendlyConnectError = (e: unknown): string => {
-    const raw = e instanceof Error ? `${e.message} ${e.name}` : "";
-    if (/denied|rejected|unauthorized|not been authorized/i.test(raw)) {
-      return "The wallet request was declined. Approve it in your wallet and try again.";
-    }
-    return "Couldn't connect that wallet. Try again or pick another one.";
-  };
-
-  // One orchestrated entrance, critically damped; static under reduced motion.
-  const rise = reduce
-    ? {}
-    : {
-        initial: { opacity: 0, y: 14 },
-        animate: { opacity: 1, y: 0 },
-        transition: { type: "spring" as const, bounce: 0, duration: 0.5 },
-      };
+  const short = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "";
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-5 py-12">
-      <SeaScene />
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#e9f0f5]">
+      {/* The generated reference art, dithered live — inverted so the dark
+          ship is a dense navy silhouette and the sky falls away. */}
+      <DitherField
+        src="/brand/sea-dawn.png"
+        invert
+        className="absolute inset-0"
+        color={["#a8d4e8", "#4aa7cf", "#0b3f63"]}
+        dotSize={2}
+        intensity={0.85}
+        speed={0.15}
+        fps={30}
+        interactive={false}
+      />
+      <ProgressiveBlur className="absolute inset-x-0 top-0 z-[1]" height="22%" position="top" />
+      <ProgressiveBlur className="absolute inset-x-0 bottom-0 z-[1]" height="30%" position="bottom" />
+      {/* soft radial scrim behind the copy only — narrow, so the ship keeps
+          its full tonal range */}
+      <div className="absolute inset-0 z-[1] bg-[radial-gradient(420px_360px_at_50%_55%,rgba(255,255,255,0.9),transparent_70%)]" />
 
-      <div className="relative z-10 flex w-full max-w-xl flex-col items-center text-center">
-        <motion.span {...rise} className="text-sm font-semibold tracking-[-0.02em] text-ink">
-          commenda
-        </motion.span>
+      {/* Hero */}
+      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 sm:px-10">
+        <h1 className="display-type text-center text-[clamp(1.9rem,4.2vw,2.9rem)] font-bold text-ink">
+          Send your agent to the auction.
+        </h1>
 
-        <motion.h1 {...rise} className="display-type mt-5 text-[clamp(2.4rem,6vw,3.6rem)] font-bold text-ink">
-          Send your agent
-          <br />
-          to the auction.
-        </motion.h1>
+        <div className="mt-4">
+          <BrandLine className="text-[clamp(1.05rem,1.6vw,1.35rem)]" />
+        </div>
+        <p className="mt-2.5 text-center font-sans text-[15px] font-bold text-ink">
+          Your agent competes on the floor in real time, by your rules.
+        </p>
 
-        <motion.p {...rise} className="mt-4 max-w-md text-[15px] leading-relaxed text-muted">
-          Live USDC auctions on Arc — your agent bids inside the budget you set.
-          Every bid escrowed; every outbid refunded instantly.
-        </motion.p>
-
-        <motion.div {...rise} className="glass-stage mt-8 w-full max-w-sm px-6 py-7">
+        {/* One-button card */}
+        <div className="mt-6 w-full max-w-[320px] rounded-2xl border border-black/[0.06] bg-white/95 p-3.5 shadow-[0_1px_2px_rgba(16,24,32,0.05),0_20px_60px_rgba(11,63,99,0.16)] backdrop-blur">
+          {isConnected && (
+            <span className="mb-2 block text-center font-mono text-[12px] text-ink/80">{short}</span>
+          )}
           {!isConnected ? (
-            <div className="flex flex-col gap-2">
-              {connectors.map((c, i) => (
-                <button
-                  key={c.uid}
-                  onClick={() => {
-                    setError("");
-                    connect({ connector: c }, { onError: (e) => setError(friendlyConnectError(e)) });
-                  }}
-                  disabled={connecting}
-                  className={`rounded-xl px-4 py-3 text-sm font-medium transition-transform active:scale-[0.97] disabled:opacity-50 ${
-                    i === 0
-                      ? "bg-accent text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)]"
-                      : "border border-white/70 bg-white/55 text-ink"
-                  }`}
-                >
-                  {connecting && i === 0 ? "Connecting…" : `Connect ${c.name}`}
-                </button>
-              ))}
-            </div>
+            <ShimmerButton
+              onClick={connectAndSignIn}
+              disabled={connecting}
+              background="linear-gradient(110deg,#14171a,#26323c)"
+              shimmerColor="#00a9d6"
+              shimmerSize="0.08em"
+              borderRadius="12px"
+              className="w-full px-4 py-3 font-sans text-[14px] font-medium text-white shadow-none disabled:opacity-50"
+            >
+              {connecting ? "Connecting…" : "Connect"}
+            </ShimmerButton>
           ) : (
-            <div>
-              <div className="rounded-xl border border-white/70 bg-white/50 px-3 py-2 text-xs text-muted">
-                {address?.slice(0, 8)}…{address?.slice(-6)}
-              </div>
-              <button
+            <div className="flex items-center gap-2">
+              <ShimmerButton
                 onClick={signIn}
                 disabled={signing}
-                className="mt-3 w-full rounded-xl bg-accent px-4 py-3 text-sm font-medium text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)] transition-transform active:scale-[0.97] disabled:opacity-50"
+                background="linear-gradient(110deg,#14171a,#26323c)"
+                shimmerColor="#00a9d6"
+                shimmerSize="0.08em"
+                borderRadius="12px"
+                className="w-full flex-1 px-4 py-2.5 font-sans text-[14px] font-medium text-white shadow-none disabled:opacity-50"
               >
                 {signing ? "Signing…" : "Sign in"}
-              </button>
+              </ShimmerButton>
               <button
                 onClick={() => disconnect()}
-                className="mt-2 text-xs text-muted underline underline-offset-2"
+                title="Disconnect"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/[0.07] bg-white text-ink/70 transition-colors hover:text-ink"
               >
-                Disconnect
+                <LogOut className="size-4" />
               </button>
             </div>
           )}
-
-          {error && <p className="mt-4 text-xs leading-relaxed text-ink">{error}</p>}
-
-          <p className="mt-4 text-[11px] leading-relaxed text-subtle">
-            Free message signature — no transaction, no gas.
-          </p>
-        </motion.div>
-
-        <a href="/live" className="mt-6 text-xs text-muted underline underline-offset-2">
-          Watch the auction as a guest →
-        </a>
+          {error && <p className="mt-2 text-center font-sans text-[13px] leading-relaxed text-ink">{error}</p>}
+        </div>
       </div>
     </main>
   );

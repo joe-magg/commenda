@@ -3,7 +3,8 @@
 ## Project
 - Next.js App Router + React 19 + TS + Tailwind v4 + shadcn/ui + Motion. Arc testnet primary; Solana devnet fallback.
 - x402 in exactly one function; ElevenLabs via server route only; deterministic `decide()` rules module; per-bid escrow with immediate refunds.
-- Read `notes/SPEC.md` for scope, `notes/DESIGN.md` for the visual grammar, `notes/SECURITY.md` for the original supply-chain notes.
+- Read `notes/STATUS.md` FIRST for current truth (what is built, deployed addresses, open issues). `notes/DESIGN.md` holds the visual grammar; `notes/SECURITY.md` the supply-chain policy. Older research notes are historical/superseded.
+- The `auction-auditor` agent is referenced in the workflow gates below but its definition is gitignored (`.opencode/`); recreate it locally or run the review manually in a fresh clone.
 
 ## Security (non-negotiable)
 - No API keys, private keys, or secrets in source, config, or chat. Keys live in `.env.local` (gitignored).

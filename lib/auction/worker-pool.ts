@@ -5,7 +5,7 @@
  * capped, out of budget, or when the lot ends.
  */
 import { getPaidAgents, placeBid, type PaidAgent } from "./bidder";
-import { listAgents, listClaims } from "@/lib/db/repo";
+import { listAgents } from "@/lib/db/repo";
 import type { Lot } from "./lots";
 import type { AuctionEvent, BidOutcome } from "./engine";
 
@@ -57,6 +57,10 @@ const g = globalThis as typeof globalThis & { __commendaPool?: BidWorkerPool };
 export class BidWorkerPool {
   private lots = new Map<number, LotState>();
   private emit: (e: AuctionEvent) => void = () => {};
+  // Wins are scoped to the current show cycle. A long-running site loops the
+  // catalog, so a global count would retire the agents after one pass.
+  private cycleWins = new Map<string, number>();
+  private lastLotId = -1;
 
   setEmitter(fn: (e: AuctionEvent) => void): void {
     this.emit = fn;
@@ -64,10 +68,13 @@ export class BidWorkerPool {
 
   /** Refresh from the registry: an agent enabled mid-show joins the next lot. */
   onLotOpen(lot: Lot, chainLotId: number): void {
+    // Wrapping from the last lot back to the first starts a fresh deploy cycle.
+    if (lot.id === 0 && this.lastLotId > 0) this.cycleWins.clear();
+    this.lastLotId = lot.id;
+
     const funded = new Map(getPaidAgents().map((a) => [a.id, a]));
     const policies = new Map(listAgents().map((a) => [a.id, a.policy]));
-    const claims = listClaims();
-    const winsFor = (id: string) => claims.filter((c) => c.winnerId === id).length;
+    const winsFor = (id: string) => this.cycleWins.get(id) ?? 0;
     const joined: JoinedAgent[] = [];
     for (const [id, agent] of funded) {
       const policy = policies.get(id);
@@ -146,9 +153,10 @@ export class BidWorkerPool {
   }
 
   /** Called on SOLD: remaining agents leave and the lot state is released. */
-  onLotEnd(chainLotId: number): void {
+  onLotEnd(chainLotId: number, winnerId?: string | null): void {
     const state = this.lots.get(chainLotId);
     if (!state) return;
+    if (winnerId) this.cycleWins.set(winnerId, (this.cycleWins.get(winnerId) ?? 0) + 1);
     for (const j of state.joined) {
       if (j.left) continue;
       j.left = true;

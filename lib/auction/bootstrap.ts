@@ -60,7 +60,7 @@ export function ensureBootstrapped(): void {
           }
         }
       }
-      pool.onLotEnd(chainLotId);
+      pool.onLotEnd(chainLotId, winner);
       return tx;
     },
   });

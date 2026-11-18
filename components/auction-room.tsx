@@ -215,11 +215,11 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               )}
             </AnimatePresence>
 
-            <div className="relative mb-1 mt-1 flex items-center justify-center">
-              <div className="stage-ring absolute h-[280px] w-[280px] rounded-full sm:h-[324px] sm:w-[324px]"
+            <div className="relative mb-1 mt-1 flex w-full items-center justify-center">
+              <div className="stage-ring absolute h-[190px] w-[190px] rounded-full sm:h-[224px] sm:w-[224px]"
                 style={{ background: `conic-gradient(from 0deg, rgba(0,169,214,0.10), rgba(0,169,214,0.55), rgba(120,180,210,0.15))` }} />
               <AgentArena
-                members={agents.filter((a) => a.active)}
+                members={agents.map((a) => ({ id: a.id, label: a.label, live: a.active }))}
                 lot={displayLot}
                 lastBidder={lastBidder}
                 bidSeq={bidSeq}

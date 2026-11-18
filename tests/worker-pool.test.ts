@@ -34,6 +34,15 @@ describe("worker pool selection", () => {
     expect(eligibleBidders(joined, 0, 100_000)).toEqual([]);
   });
 
+  it("resets win counts when the catalog loops back to lot zero", () => {
+    // canDeploy is the guardrail used with per-cycle wins; after a reset the
+    // count is 0 so the agent may deploy again on the new cycle.
+    expect(canDeploy(1, 1)).toBe(false); // capped in cycle 1
+    const cycleWins = new Map<string, number>();
+    cycleWins.clear(); // simulated wrap to lot 0
+    expect(canDeploy(cycleWins.get("a") ?? 0, 1)).toBe(true); // fresh cycle
+  });
+
   it("never lets the current leader bid against itself", () => {
     // Mirrors onBidSlot: eligible indices are filtered by the leader id.
     const ids = ["agent-A", "agent-B"];

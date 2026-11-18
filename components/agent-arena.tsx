@@ -7,11 +7,12 @@ import { agentIdentity } from "@/lib/agent-identity";
 import { ItemArt } from "@/components/item-art";
 import type { Lot } from "@/lib/auction/lots";
 
-type Member = { id: string; label: string };
+type Member = { id: string; label: string; live: boolean };
 
 /**
- * The live stage as an "arena": agents ring the item, and each bid fires a
- * beam from that agent into the centre — they visibly fight for the lot.
+ * The live stage as an "arena": the full agent roster flanks the item in two
+ * columns, and each bid fires a beam from that agent into the centre — they
+ * visibly fight for the lot. Only live (funded) agents ever bid.
  */
 export function AgentArena({
   members,
@@ -31,7 +32,6 @@ export function AgentArena({
   const nodeRefs = useRef<Record<string, RefObject<HTMLDivElement | null>>>({});
   const [active, setActive] = useState<string | null>(null);
 
-  // React's ref callback identity changes each render; keep stable refs per id.
   const refs = useMemo(() => {
     const map: Record<string, RefObject<HTMLDivElement | null>> = {};
     for (const m of members) {
@@ -48,35 +48,37 @@ export function AgentArena({
     return () => window.clearTimeout(t);
   }, [lastBidder, bidSeq, reduce]);
 
-  // Evenly distribute agents around a circle; the item sits at the centre.
-  const count = Math.max(members.length, 1);
+  // Split roster into two side columns, evenly spaced top to bottom.
+  const half = Math.ceil(members.length / 2);
   const positioned = members.map((m, i) => {
-    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
-    return { ...m, x: 50 + 40 * Math.cos(angle), y: 50 + 40 * Math.sin(angle) };
+    const left = i < half;
+    const col = left ? members.slice(0, half) : members.slice(half);
+    const row = left ? i : i - half;
+    const y = col.length === 1 ? 50 : 18 + (row / (col.length - 1)) * 64;
+    return { ...m, x: left ? 8 : 92, y };
   });
 
   return (
-    <div ref={container} className="relative h-[280px] w-[280px] sm:h-[320px] sm:w-[320px]">
-      {/* beams — re-key on bidSeq so a new bid restarts the travelling pulse */}
+    <div ref={container} className="relative h-[280px] w-full max-w-[520px] sm:h-[320px]">
       {!reduce && active && refs[active]?.current && (
         <AnimatedBeam
           key={`${active}-${bidSeq}`}
           containerRef={container}
           fromRef={refs[active]}
           toRef={center}
-          curvature={18}
+          curvature={16}
           duration={1}
           repeat={1}
           pathColor="#00a9d6"
           pathWidth={2}
-          pathOpacity={0.25}
+          pathOpacity={0.3}
           gradientStartColor="#00a9d6"
           gradientStopColor="#7fd6ff"
         />
       )}
 
       {/* centre item */}
-      <div ref={center} className="absolute left-1/2 top-1/2 h-[168px] w-[168px] -translate-x-1/2 -translate-y-1/2 sm:h-[196px] sm:w-[196px]">
+      <div ref={center} className="absolute left-1/2 top-1/2 h-[150px] w-[150px] -translate-x-1/2 -translate-y-1/2 sm:h-[184px] sm:w-[184px]">
         <motion.div
           animate={reduce ? {} : { rotate: 360 }}
           transition={{ duration: 26, ease: "linear", repeat: Infinity }}
@@ -90,7 +92,6 @@ export function AgentArena({
         </motion.div>
       </div>
 
-      {/* agent nodes */}
       <AnimatePresence>
         {positioned.map((m) => {
           const id = agentIdentity(m.id);
@@ -105,9 +106,11 @@ export function AgentArena({
               transition={{ duration: 0.45 }}
             >
               <div
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/80 bg-white/75 text-[13px] font-semibold shadow-md backdrop-blur-md"
+                className={`flex h-9 w-9 items-center justify-center rounded-full border text-[13px] font-semibold shadow-md backdrop-blur-md ${
+                  m.live ? "border-white/80 bg-white/80" : "border-white/50 bg-white/35 opacity-55"
+                }`}
                 style={{ color: id.color, boxShadow: isActive ? `0 0 0 4px ${id.soft}` : undefined }}
-                title={m.label}
+                title={`${m.label}${m.live ? "" : " (standby)"}`}
               >
                 {id.glyph}
               </div>

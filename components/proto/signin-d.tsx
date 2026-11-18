@@ -21,7 +21,6 @@ export function SignInD() {
 
   const short = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "";
   const connector = connectors[0];
-  const connectorLabel = /metamask/i.test(connector?.name ?? "") ? "MetaMask" : (connector?.name ?? "wallet");
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#e9f0f5]">
@@ -72,7 +71,7 @@ export function SignInD() {
               borderRadius="12px"
               className="w-full px-4 py-3 font-sans text-[14px] font-medium text-white shadow-none disabled:opacity-50"
             >
-              {connecting ? "Connecting…" : `Connect ${connectorLabel}`}
+              {connecting ? "Connecting…" : "Connect"}
             </ShimmerButton>
           ) : (
             <div className="flex items-center gap-2">

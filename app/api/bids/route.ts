@@ -20,6 +20,7 @@ import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
 import { getRuntime } from "@/lib/auction/runtime";
+import { record } from "@/lib/auction/trace";
 import { listAgents, recordAuditEvent } from "@/lib/db/repo";
 
 const NETWORK = "eip155:5042002" as const;
@@ -107,6 +108,28 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   const start = Date.now();
   const { code, body: dto } = await handleBid(body, payer, deps);
   console.info("[commenda:bids] handled", JSON.stringify({ status: dto.status, ms: Date.now() - start }));
+  // Server-side trace: handler latency and outcome per request. The pool's
+  // trace records the same bid from the driver side with client latency.
+  if (body && typeof body === "object" && "amountMinor" in (body as Record<string, unknown>)) {
+    const b = body as { lotId?: unknown; amountMinor?: unknown };
+    record({
+      kind: "bid_outcome",
+      at: Date.now(),
+      agentId: deps.resolveAgentId(payer) ?? payer,
+      chainLotId: Number(b.lotId ?? 0),
+      amountMinor: typeof b.amountMinor === "number" ? b.amountMinor : 0,
+      status:
+        dto.status === "placed" ? "placed"
+        : dto.status === "pending" ? "pending"
+        : dto.status === "rejected" ? "rejected"
+        : dto.status === "needs_approval" ? "needs_approval"
+        : dto.status === "busy" ? "busy"
+        : dto.status === "no_agent" ? "no_agent"
+        : "failed",
+      rule: dto.rule,
+      msServer: Date.now() - start,
+    });
+  }
   return NextResponse.json(dto, { status: code });
 }
 

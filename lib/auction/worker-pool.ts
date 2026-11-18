@@ -5,6 +5,7 @@
  * capped, out of budget, or when the lot ends.
  */
 import { getPaidAgents, placeBid, type PaidAgent } from "./bidder";
+import { record, type TraceEvent } from "./trace";
 import { listAgents } from "@/lib/db/repo";
 import type { Lot } from "./lots";
 import type { AuctionEvent, BidOutcome } from "./engine";
@@ -50,6 +51,8 @@ type LotState = {
   displayId: number;
   joined: JoinedAgent[];
   currentBidder: string | null;
+  /** A slot's outcome is still resolving — the next slot must not start. */
+  slotBusy: boolean;
 };
 
 const g = globalThis as typeof globalThis & { __commendaPool?: BidWorkerPool };
@@ -93,13 +96,18 @@ export class BidWorkerPool {
       });
       this.emit({ type: "agent_join", agentId: id, label: agent.label, lotId: lot.id });
     }
-    this.lots.set(chainLotId, { displayId: lot.id, joined, currentBidder: null });
+    this.lots.set(chainLotId, { displayId: lot.id, joined, currentBidder: null, slotBusy: false });
+    record({ kind: "lot_open", at: Date.now(), chainLotId, displayId: lot.id });
   }
 
   /** Pick an eligible agent for this slot and place a policy-derived bid. */
   async onBidSlot(lot: Lot, slot: number, chainLotId: number): Promise<BidOutcome | null> {
     const state = this.lots.get(chainLotId);
     if (!state) return null;
+    // Defense in depth against overlapping slots (the engine chains them, but
+    // a manual Next() or a slow bid must never produce concurrent bids): one
+    // unresolved slot per lot, period.
+    if (state.slotBusy) return null;
 
     const nextAmount = nextBidAmount(lot.openingMinor, slot);
     // Never let the current leader bid again — self-outbids are pointless churn.
@@ -122,6 +130,9 @@ export class BidWorkerPool {
     const pick = state.joined[eligibleIndices[slot % eligibleIndices.length]];
     pick.bids++;
     const previousBidder = state.currentBidder;
+    state.slotBusy = true;
+    record({ kind: "bid_attempt", at: Date.now(), agentId: pick.agent.id, chainLotId, amountMinor: nextAmount, slot });
+    const startedAt = Date.now();
     const result = await placeBid(pick.agent, {
       id: `${pick.agent.id.slice(0, 10)}-${chainLotId}-${nextAmount}`,
       lotId: String(chainLotId),
@@ -129,9 +140,32 @@ export class BidWorkerPool {
       category: lot.category,
       seller: lot.seller,
     });
+    state.slotBusy = false;
+
+    // Trace the outcome with the bidder-side latency.
+    const outcome: TraceEvent = {
+      kind: "bid_outcome",
+      at: Date.now(),
+      agentId: pick.agent.id,
+      chainLotId,
+      amountMinor: nextAmount,
+      status: "rejected",
+      rule: result.ok ? undefined : result.rule,
+      msClient: Date.now() - startedAt,
+    };
+    if (result.ok) {
+      outcome.status = "placed";
+      state.currentBidder = pick.agent.id;
+    } else if (result.rule === "PENDING") {
+      outcome.status = "pending";
+    } else if (result.rule === "busy" || result.rule === "NETWORK_ERROR") {
+      outcome.status = result.rule === "busy" ? "busy" : "failed";
+    } else if (result.rule === "needs_approval" || result.rule === "no_agent") {
+      outcome.status = result.rule;
+    }
+    record(outcome);
 
     if (result.ok) {
-      state.currentBidder = pick.agent.id;
       return { ...result, previousBidder: previousBidder ?? undefined };
     }
 
@@ -154,6 +188,7 @@ export class BidWorkerPool {
 
   /** Called on SOLD: remaining agents leave and the lot state is released. */
   onLotEnd(chainLotId: number, winnerId?: string | null): void {
+    record({ kind: "lot_end", at: Date.now(), chainLotId, winner: winnerId ?? null });
     const state = this.lots.get(chainLotId);
     if (!state) return;
     if (winnerId) this.cycleWins.set(winnerId, (this.cycleWins.get(winnerId) ?? 0) + 1);

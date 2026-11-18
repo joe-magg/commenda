@@ -73,8 +73,14 @@ export async function placeBid(agent: PaidAgent, bid: ProposedBid): Promise<BidO
       body: JSON.stringify(bid),
     });
     const dto = (await res.json().catch(() => ({}))) as { status?: string; rule?: string; txHash?: string };
-    if (res.ok && (dto.status === "placed" || dto.status === "pending")) {
+    if (res.ok && dto.status === "placed") {
       return { ok: true, amountMinor: bid.amountMinor, bidder: agent.id, txHash: dto.txHash ?? "" };
+    }
+    // "pending" (broadcast landed, receipt unknown) must NOT claim leadership:
+    // the tx may still revert. The pool records it as churn and skips the
+    // leader update; the resolver settles the truth.
+    if (res.ok && dto.status === "pending") {
+      return { ok: false, agentId: agent.id, rule: "PENDING", amountMinor: bid.amountMinor };
     }
     return { ok: false, agentId: agent.id, rule: dto.rule ?? dto.status ?? `HTTP_${res.status}`, amountMinor: bid.amountMinor };
   } catch {

@@ -31,7 +31,7 @@ describe("auction engine state machine", () => {
       onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     expect(engine.snapshot().currentBidMinor).toBe(200_000);
     expect(engine.snapshot().leaderLabel).toBeTruthy();
     expect(events.some((e) => e.type === "bid")).toBe(true);
@@ -42,7 +42,7 @@ describe("auction engine state machine", () => {
       onBidSlot: async () => ({ ok: false, agentId: "0xabc", rule: "WATCHLIST", amountMinor: 200_000 }),
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     expect(engine.snapshot().currentBidMinor).toBe(100_000);
     expect(events.some((e) => e.type === "reject")).toBe(true);
   });
@@ -54,7 +54,7 @@ describe("auction engine state machine", () => {
       onSold: settle,
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     engine.next();
     // Bounded advance — the engine intentionally loops forever, so never runAllTimers.
     await vi.advanceTimersByTimeAsync(TIMING.soldMs + 500);
@@ -82,9 +82,9 @@ describe("auction engine state machine", () => {
       onSold: () => gate,
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     // Run the countdown: finishLot starts and awaits the gated onSold.
-    await vi.advanceTimersByTimeAsync(TIMING.biddingMs - TIMING.bidOffsetsMs[0] + TIMING.countdownMs + 100);
+    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.slotGapMs + 100);
     expect(engine.snapshot().phase).toBe("sold");
     expect(events.filter((e) => e.type === "sold").length).toBe(0);
 
@@ -106,7 +106,7 @@ describe("auction engine state machine", () => {
       onBidSlot: async (_lot, slot) => (slot === 0 ? gate : null),
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     // The slot hook is still pending; advance the show past this lot.
     await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs + 500);
     expect(engine.snapshot().lotIndex).toBe(1);
@@ -117,16 +117,45 @@ describe("auction engine state machine", () => {
     expect(engine.snapshot().leaderLabel).toBeNull();
   });
 
+  it("chains bid slots — never two bids in flight", async () => {
+    let active = 0;
+    let maxActive = 0;
+    engine.setHooks({
+      onBidSlot: async () => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 50));
+        active--;
+        return null;
+      },
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 4 * (TIMING.slotGapMs + 100));
+    expect(maxActive).toBe(1);
+  });
+
+  it("recovers the show when a driver hangs (slot timeout)", async () => {
+    engine.setHooks({
+      onBidSlot: () => new Promise(() => {}), // wedged forever
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(
+      TIMING.introMs + TIMING.slotGapMs + TIMING.slotTimeoutMs + TIMING.slotGapMs + TIMING.countdownMs + TIMING.soldMs + 200,
+    );
+    // The wedged lot must end and the next lot must open anyway.
+    expect(engine.snapshot().lotIndex).toBe(1);
+  });
+
   it("gives each loop of a lot a fresh on-chain id", async () => {
     const ids: number[] = [];
     engine.setHooks({
       onBidSlot: async (_lot, _slot, chainLotId) => { ids.push(chainLotId); return null; },
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     // Run out the lot, advance into the next cycle's first bid slot.
     await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs);
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
     expect(ids.length).toBeGreaterThan(1);
     // Slots within one visit share an id; a new loop must get a different one.
     expect(new Set(ids).size).toBeGreaterThan(1);

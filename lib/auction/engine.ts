@@ -54,12 +54,16 @@ export type EngineHooks = {
 
 export const TIMING = {
   introMs: 3500,
-  // Server-side bid processing is ~0.6-2s: x402 verify + placeBid + a receipt
-  // wait (sub-second on Arc) so a reverted bid can never be fee-settled or
-  // credited as a win. The remaining ~3-4s is Circle's remote /verify + /settle.
-  // Space slots to that cadence so bids don't collide.
+  // One bid round-trip is ~4-5s on Arc (x402 verify + settle + receipt wait),
+  // so fixed slot offsets used to OVERLAP: two bids in flight at once, and the
+  // lower one could land after the higher and revert — wasted churn that read
+  // as agents outbidding themselves. Slots are now CHAINED: the next bid
+  // starts slotGapMs after the previous resolves; two bids are never in
+  // flight simultaneously. biddingMs is a floor on the bidding window.
+  slotGapMs: 1500,
+  maxBidSlots: 4,
+  slotTimeoutMs: 8000,
   biddingMs: 15000,
-  bidOffsetsMs: [1200, 4800, 8400, 12000],
   countdownMs: 5000,
   soldMs: 3200,
 } as const;
@@ -82,6 +86,7 @@ export class AuctionEngine {
   private advancing = false;
   private lotVisits = 0;
   private currentChainLotId = 0;
+  private phaseStart = 0;
   private lots: readonly Lot[] = LOTS;
 
   /** Replace the catalog with generated session items before start(). */
@@ -196,11 +201,38 @@ export class AuctionEngine {
     this.state = { ...this.state, phase: "bidding" };
     this.emit({ type: "phase", phase: "bidding" });
     this.emit({ type: "snapshot", state: this.snapshot() });
+    this.phaseStart = Date.now();
+    this.later(() => { void this.runBidSlotChain(lot, 0); }, TIMING.slotGapMs);
+  }
 
-    for (let i = 0; i < TIMING.bidOffsetsMs.length; i++) {
-      this.later(() => { void this.runBidSlot(lot, i); }, TIMING.bidOffsetsMs[i]);
+  /**
+   * Chain the bid slots: each slot runs to completion (placed, rejected or
+   * failed) before the next is scheduled, so two bids are never in flight at
+   * once. A wedged driver recovers after slotTimeoutMs by ending the bidding
+   * for this lot — the show must never freeze on one stuck bid.
+   */
+  private async runBidSlotChain(lot: Lot, slot: number): Promise<void> {
+    const gen = this.generation;
+    let settled = false;
+    await Promise.race([
+      this.runBidSlot(lot, slot).then(() => { settled = true; }),
+      new Promise<void>((r) => setTimeout(r, TIMING.slotTimeoutMs)),
+    ]);
+    if (gen !== this.generation) return; // superseded by Next()
+    if (!settled) {
+      // Driver wedged: abandon the remaining slots and recover the show.
+      // (If the stuck bid later lands on the SAME lot, the existing
+      // chainLotId guard still applies its outcome.)
+      this.later(() => this.beginCountdown(lot), TIMING.slotGapMs);
+      return;
     }
-    this.later(() => this.beginCountdown(lot), TIMING.biddingMs);
+    const next = slot + 1;
+    if (next < TIMING.maxBidSlots) {
+      this.later(() => { void this.runBidSlotChain(lot, next); }, TIMING.slotGapMs);
+    } else {
+      const wait = Math.max(TIMING.slotGapMs, this.phaseStart + TIMING.biddingMs - Date.now());
+      this.later(() => this.beginCountdown(lot), wait);
+    }
   }
 
   private async runBidSlot(lot: Lot, slot: number): Promise<void> {

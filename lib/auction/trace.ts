@@ -26,7 +26,12 @@ export type TraceEvent =
     };
 
 const MAX_EVENTS = 4000;
-const events: TraceEvent[] = [];
+
+// Backed by globalThis: dev-mode module forking gives route bundles and the
+// engine separate module instances (the same reason AuctionState lives on
+// globalThis) — the trace must be one shared buffer.
+const g = globalThis as typeof globalThis & { __commendaTraceEvents?: TraceEvent[] };
+const events: TraceEvent[] = (g.__commendaTraceEvents ??= []);
 
 export function record(event: TraceEvent): void {
   events.push(event);
@@ -85,9 +90,9 @@ function foldServerViews(events: TraceEvent[]): Outcome[] {
         s.chainLotId === c.chainLotId &&
         s.amountMinor === c.amountMinor &&
         s.status === c.status &&
-        Math.abs(s.at - c.at) <= 3000,
+        Math.abs(s.at - c.at) <= 30_000,
     );
-    if (si >= 0) {
+      if (si >= 0) {
       consumed.add(si);
       merged.push({ ...c, msServer: outcomes[si].msServer ?? c.msServer, rule: c.rule ?? outcomes[si].rule });
     } else {

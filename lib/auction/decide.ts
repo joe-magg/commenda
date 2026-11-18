@@ -14,7 +14,7 @@
  * safe. `BID` output binds ONLY to `place_bid` — never a transfer/withdraw
  * tool — and the raw on-chain outcome must be verified before it is trusted.
  *
- * `spentMinor` semantics (SPEC L4): funds currently committed in escrow
+ * `spentMinor` semantics: funds currently committed in escrow
  * across open lots. Caller increments on submit, decrements on outbid refund.
  */
 

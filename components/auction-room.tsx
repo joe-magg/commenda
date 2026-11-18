@@ -11,7 +11,6 @@ import { BorderBeam } from "@/components/ui/border-beam";
 import { MagicCard } from "@/components/ui/magic-card";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Dock, DockIcon } from "@/components/ui/dock";
-import { AnimatedList, AnimatedListItem } from "@/components/ui/animated-list";
 import { Volume2, VolumeX, SkipForward, LayoutDashboard } from "lucide-react";
 
 export type AgentView = {
@@ -25,6 +24,8 @@ export type AgentView = {
   approvalAboveMinor: number;
   maxWins: number;
   active: boolean;
+  /** True when the signed-in user owns this agent — financials render only for these. */
+  owned?: boolean;
 };
 
 type SpokenLine = { text: string; audioUrl?: string };
@@ -262,20 +263,28 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               {bids.length === 0 ? (
                 <span className="text-xs text-subtle">No bids yet on this lot.</span>
               ) : (
-                <AnimatedList delay={140} className="!gap-1.5">
+                // Newest first — matching the label. AnimatedList internally
+                // reverses its children, which is what made the tape read as
+                // impossible descending bids.
+                <AnimatePresence initial={false}>
                   {bids.map((b) => {
                     const id = agentIdentity(b.agentId);
                     return (
-                      <AnimatedListItem key={b.key}>
+                      <motion.div key={b.key} layout
+                        initial={{ opacity: 0, scale: 0.96, y: -6 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.96 }}
+                        transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+                        className="mx-auto mb-1.5 w-full">
                         <div className="flex items-center gap-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-xs shadow-sm">
                           <span className="text-sm" style={{ color: id.color }}>{id.glyph}</span>
                           <span className="font-semibold text-ink">{b.label}</span>
                           <span className="tabular ml-auto font-semibold text-accent-deep">{formatMinor(b.amountMinor)}</span>
                         </div>
-                      </AnimatedListItem>
+                      </motion.div>
                     );
                   })}
-                </AnimatedList>
+                </AnimatePresence>
               )}
             </div>
           </div>
@@ -296,8 +305,10 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               <div className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1">
                 {agents.map((a) => {
                   const id = agentIdentity(a.id);
-                  const spent = committed[a.id] ?? 0;
-                  const pct = Math.min(100, (spent / a.budgetMinor) * 100);
+                  // Financials (budget, committed, win cap) are private to the
+                  // owner — spectators see identity and status only.
+                  const spent = a.owned ? (committed[a.id] ?? 0) : 0;
+                  const pct = a.owned && a.budgetMinor > 0 ? Math.min(100, (spent / a.budgetMinor) * 100) : 0;
                   return (
                     <MagicCard key={a.id} gradientSize={180} gradientColor="#0d9ec4" className="rounded-xl border border-white/70 bg-white/45 p-3">
                       <div className="flex items-center gap-2">
@@ -310,15 +321,21 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                           </div>
                           <div className="truncate text-[10px] text-subtle">{a.short}</div>
                         </div>
-                        <span className="tabular ml-auto text-xs text-muted">{formatMinor(a.budgetMinor)}</span>
+                        {a.owned && (
+                          <span className="tabular ml-auto text-xs text-muted">{formatMinor(a.budgetMinor)}</span>
+                        )}
                       </div>
-                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
-                        <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, background: id.color }} />
-                      </div>
-                      <div className="tabular mt-1 flex justify-between text-[10px] text-muted">
-                        <span>{formatMinor(spent)} committed</span>
-                        <span>stop after {a.maxWins}</span>
-                      </div>
+                      {a.owned && (
+                        <>
+                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
+                            <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, background: id.color }} />
+                          </div>
+                          <div className="tabular mt-1 flex justify-between text-[10px] text-muted">
+                            <span>{formatMinor(spent)} committed</span>
+                            <span>stop after {a.maxWins}</span>
+                          </div>
+                        </>
+                      )}
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {a.watchlist.map((w) => <span key={w} className="rounded bg-white/60 px-1.5 py-0.5 text-[10px] text-muted">{w}</span>)}
                       </div>

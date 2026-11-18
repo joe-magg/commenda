@@ -151,7 +151,7 @@ export function AgentDashboard({ userName }: { userName: string }) {
             className="whitespace-nowrap rounded-xl border border-white/70 bg-white/55 px-3 py-2 text-xs font-medium text-ink shadow-sm backdrop-blur-xl">
             Sign out
           </button>
-          <a href="/" className="whitespace-nowrap rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)]">
+          <a href="/live" className="whitespace-nowrap rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-[0_6px_18px_rgba(0,169,214,0.35)]">
             Watch the auction
           </a>
         </div>
@@ -173,7 +173,7 @@ export function AgentDashboard({ userName }: { userName: string }) {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className={`h-1.5 w-1.5 rounded-full ${a.enabled ? "bg-settled" : "bg-subtle"}`} />
+                          <span className={`h-1.5 w-1.5 rounded-full ${a.enabled ? "bg-accent" : "bg-subtle"}`} />
                           <span className="font-semibold text-ink">{a.label}</span>
                           <span className="text-[11px] text-subtle">{a.status}</span>
                         </div>
@@ -278,6 +278,51 @@ export function AgentDashboard({ userName }: { userName: string }) {
 
         <aside className="flex flex-col gap-5">
           <div className="card p-5">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">Your wins</h2>
+            {myClaims.length === 0 ? (
+              <p className="text-xs text-subtle">No wins yet. Claims appear here when your agent takes a lot.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {myClaims.map((c) => (
+                  <div key={c.id} className="rounded-lg border border-line p-3">
+                    <div className="mb-2 flex justify-center">
+                      <ItemArt seed={artSeedFor(c.sku)} size={96} className="rounded-lg" />
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-semibold text-ink">{c.title}</span>
+                      <span className="tabular text-xs text-muted">{formatMinor(c.amountMinor)}</span>
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-subtle">SKU {c.sku}</div>
+                    {c.settleTx && (
+                      <a
+                        href={`https://explorer.testnet.arc.io/tx/${c.settleTx}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 block font-mono text-[10px] text-muted underline underline-offset-2"
+                      >
+                        on-chain settlement ↗
+                      </a>
+                    )}
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className={`text-[10px] ${c.status === "redeemed" ? "text-win" : "text-subtle"}`}>
+                        {c.status === "redeemed" ? "redeemed" : "right to redeem"}
+                      </span>
+                      {c.status === "issued" && (
+                        <button
+                          onClick={() => redeem(c)}
+                          className="rounded border border-line bg-surface px-2 py-1 text-[10px] font-medium text-ink hover:border-muted"
+                        >
+                          Redeem (simulated)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card p-5">
             <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">Upcoming sessions</h2>
             {sessions.map((s) => (
               <div key={s.id} className="mb-4 last:mb-0">
@@ -329,58 +374,6 @@ export function AgentDashboard({ userName }: { userName: string }) {
               )}
             </div>
           )}
-
-          <div className="card p-5">
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted">Your wins</h2>
-            {myClaims.length === 0 ? (
-              <p className="text-xs text-subtle">No wins yet. Claims appear here when an agent takes a lot.</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {myClaims.map((c) => (
-                  <div key={c.id} className="rounded-lg border border-line p-3">
-                    <div className="mb-2 flex justify-center">
-                      <ItemArt seed={artSeedFor(c.sku)} size={96} className="rounded-lg" />
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-semibold text-ink">{c.title}</span>
-                      <span className="tabular text-xs text-muted">{formatMinor(c.amountMinor)}</span>
-                    </div>
-                    <div className="mt-1 font-mono text-[10px] text-subtle">SKU {c.sku}</div>
-                    <div className="mt-1 font-mono text-[10px] text-subtle">claim {c.id}</div>
-                    {c.settleTx && (
-                      <a
-                        href={`https://explorer.testnet.arc.io/tx/${c.settleTx}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 block font-mono text-[10px] text-muted underline underline-offset-2"
-                      >
-                        on-chain settlement ↗
-                      </a>
-                    )}
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className={`text-[10px] ${c.status === "redeemed" ? "text-settled" : "text-subtle"}`}>
-                        {c.status === "redeemed" ? "redeemed" : "right to redeem"}
-                      </span>
-                      {c.status === "issued" && (
-                        <button
-                          onClick={() => redeem(c)}
-                          className="rounded border border-line bg-surface px-2 py-1 text-[10px] font-medium text-ink hover:border-muted"
-                        >
-                          Redeem (simulated)
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="card p-5 text-xs leading-relaxed text-muted">
-            <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-muted">Demo scope</h2>
-            Users, agents, policies and sessions are persisted in SQLite. New agents start with no wallet key,
-            so the worker pool will skip them until funding is wired up in the next phase.
-          </div>
         </aside>
       </div>
     </main>

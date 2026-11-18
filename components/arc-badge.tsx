@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Official Arc brand mark (arc.io partner assets — permitted for teams
- * building on Arc). Mono type per the type system: small labels are Geist Mono.
+ * "USDC · Arc" — the currency/chain mark. Official Arc icon (press kit,
+ * permitted for teams building on Arc) in the navy gradient, legible on
+ * light surfaces. Geist Mono for the label per the type system.
  */
 export function ArcBadge({
   className,
-  text = "USDC · Arc testnet",
+  text = "USDC · Arc",
 }: {
   className?: string;
   text?: string;
@@ -19,7 +20,7 @@ export function ArcBadge({
       )}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/arc-icon.svg" alt="" width={13} height={13} className="shrink-0" />
+      <img src="/brand/arc-icon-navy-gradient.svg" alt="" width={12} height={13} className="shrink-0" />
       {text}
     </span>
   );

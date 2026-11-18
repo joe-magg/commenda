@@ -7,6 +7,8 @@ import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
 import { agentIdentity } from "@/lib/agent-identity";
 import { AgentArena } from "@/components/agent-arena";
+import { AgentMark } from "@/components/agent-mark";
+import { ArcBadge } from "@/components/arc-badge";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { MagicCard } from "@/components/ui/magic-card";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -201,8 +203,8 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section className="flex flex-col gap-5">
-          {/* CENTERED GLASS STAGE — the one bold element */}
-          <div className="glass-stage relative flex min-h-[440px] flex-col items-center overflow-hidden px-6 py-7 sm:min-h-[480px]">
+          {/* CENTERED STAGE — the HoloCard is the one focal point */}
+          <div className="glass-stage relative flex min-h-[560px] flex-col items-center overflow-hidden px-6 py-7 sm:min-h-[600px]">
             {!reduce && isLive && <BorderBeam size={90} duration={9} colorFrom="#00a9d6" colorTo="#7fd6ff" borderWidth={2} />}
             <AnimatePresence>
               {sold && (
@@ -216,9 +218,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               )}
             </AnimatePresence>
 
-            <div className="relative mb-1 mt-1 flex w-full items-center justify-center">
-              <div className="stage-ring absolute h-[190px] w-[190px] rounded-full sm:h-[224px] sm:w-[224px]"
-                style={{ background: `conic-gradient(from 0deg, rgba(0,169,214,0.10), rgba(0,169,214,0.55), rgba(120,180,210,0.15))` }} />
+            <div className="relative mt-1 flex w-full items-center justify-center">
               <AgentArena
                 members={agents.map((a) => ({ id: a.id, label: a.label, live: a.active }))}
                 lot={displayLot}
@@ -229,27 +229,21 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
             </div>
 
             <div className="flex flex-col items-center text-center">
-              {/* Item name lives directly under the object — the focal hierarchy
-                  is: object → what it is → its price. */}
-              <div className="max-w-md text-[17px] font-medium leading-snug text-ink">
+              <div className="max-w-md text-[16px] font-medium leading-snug text-ink">
                 {displayLot?.title ?? "Preparing the next lot"}
               </div>
               <NumberTicker
                 value={current / 1_000_000}
                 startValue={current / 1_000_000}
                 decimalPlaces={2}
-                className="mt-2 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold !text-ink"
+                className="mt-1.5 display-type text-[clamp(2.6rem,6vw,4rem)] font-semibold !text-ink"
               />
               {/* Arc pill meshes the currency with the chain this runs on. */}
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-accent/20 bg-accent/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-accent-deep">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                USDC <span className="text-accent/50">·</span> Arc
-              </div>
+              <ArcBadge className="mt-1" />
               {phase === "countdown" && (
                 <motion.div key={snap?.countdown} initial={{ opacity: 0.4, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                  className="mt-2 text-xl font-semibold text-accent">{snap?.countdown}s</motion.div>
+                  className="mt-1.5 text-xl font-semibold text-ink">{snap?.countdown}s</motion.div>
               )}
-              {isLive && <div className="mt-4 text-[10px] font-medium tracking-[0.1em] text-accent">BIDDING OPEN</div>}
             </div>
           </div>
 
@@ -304,7 +298,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
             {tab === "agents" ? (
               <div className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1">
                 {agents.map((a) => {
-                  const id = agentIdentity(a.id);
                   // Financials (budget, committed, win cap) are private to the
                   // owner — spectators see identity and status only.
                   const spent = a.owned ? (committed[a.id] ?? 0) : 0;
@@ -312,8 +305,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                   return (
                     <MagicCard key={a.id} gradientSize={180} gradientColor="#0d9ec4" className="rounded-xl border border-white/70 bg-white/45 p-3">
                       <div className="flex items-center gap-2">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-lg text-xs font-semibold"
-                          style={{ background: id.soft, color: id.color }}>{id.glyph}</span>
+                        <AgentMark id={a.id} size={26} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-sm font-semibold text-ink">{a.label}</span>
@@ -328,7 +320,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
                       {a.owned && (
                         <>
                           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
-                            <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, background: id.color }} />
+                            <div className="h-full rounded-full transition-[width] duration-500 bg-accent" style={{ width: `${pct}%` }} />
                           </div>
                           <div className="tabular mt-1 flex justify-between text-[10px] text-muted">
                             <span>{formatMinor(spent)} committed</span>
@@ -377,10 +369,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
             </div>
           </div>
 
-          <div className="card p-4 text-[11px] leading-relaxed text-muted">
-            <span className="font-medium text-ink">Decision loop — </span>
-            watch the lot, check the watchlist, enforce budget + caps in code, then pay per bid via x402. The model never moves money.
-          </div>
         </aside>
       </div>
 

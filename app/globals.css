@@ -159,14 +159,10 @@ body {
   line-height: 1.02;
 }
 
-@keyframes stage-spin {
-  to { transform: rotate(360deg); }
-}
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
-.stage-ring { animation: stage-spin 26s linear infinite; }
 .live-dot { animation: live-pulse 1.9s ease-in-out infinite; }
 
 /* Apple-style reduced-motion + reduced-transparency: a gentler, non-vestibular

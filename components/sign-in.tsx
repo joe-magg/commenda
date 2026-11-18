@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
+import dynamic from "next/dynamic";
+
+const ShipScene = dynamic(() => import("@/components/ship-scene").then((m) => m.ShipScene), { ssr: false });
 
 export function SignIn({ onSuccess }: { onSuccess?: () => void }) {
   const { address, isConnected } = useAccount();
@@ -35,8 +38,9 @@ export function SignIn({ onSuccess }: { onSuccess?: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-5">
-      <div className="glass-stage w-full max-w-md px-7 py-9 text-center">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-5">
+      <ShipScene />
+      <div className="glass-stage relative z-10 w-full max-w-md px-7 py-9 text-center">
         <div className="display-type text-2xl font-semibold">commenda</div>
         <h1 className="mt-6 text-xl font-semibold text-ink">Sign in to your dashboard</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">

@@ -1,9 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { formatMinor } from "@/lib/auction/lots";
 import { ItemArt } from "@/components/item-art";
 import { artSeedFor } from "@/lib/items/generator";
+
+const HoloCard = dynamic(() => import("@/components/HoloCard"), { ssr: false });
+const CircularCarousel = dynamic(() => import("@/components/CircularCarousel"), { ssr: false });
 
 type User = { id: string; name: string };
 type Policy = {
@@ -316,17 +320,26 @@ export function AgentDashboard({ userName }: { userName: string }) {
                 {receipts.map((r) => {
                   const d = decodeReceipt(r.uri);
                   return (
-                    <div key={r.tokenId} className="rounded-xl border border-white/70 bg-white/45 p-2">
-                      {d?.image && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={d.image} alt={d.name} className="w-full rounded-lg" />
-                      )}
-                      <div className="mt-2 truncate text-[11px] font-semibold text-ink">{d?.name ?? `Receipt #${r.tokenId}`}</div>
+                    <div key={r.tokenId} className="flex flex-col items-center rounded-xl border border-white/70 bg-white/45 p-3">
+                      {d?.image && <HoloCard image={d.image} alt={d.name} width={140} radius={12} intensity={0.7} />}
+                      <div className="mt-2 w-full truncate text-[11px] font-semibold text-ink">{d?.name ?? `Receipt #${r.tokenId}`}</div>
                       <div className="font-mono text-[9px] text-subtle">soulbound · #{r.tokenId}</div>
                     </div>
                   );
                 })}
               </div>
+              {receipts.length > 2 && (
+                <div className="mt-4">
+                  <CircularCarousel
+                    items={receipts.map((r) => {
+                      const d = decodeReceipt(r.uri);
+                      return { src: d?.image ?? "", alt: d?.name ?? `Receipt #${r.tokenId}`, title: d?.name };
+                    })}
+                    cardWidth={120}
+                    captions
+                  />
+                </div>
+              )}
             </div>
           )}
 

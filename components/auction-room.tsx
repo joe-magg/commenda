@@ -5,8 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { AuctionEvent, EngineSnapshot } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
-import { ItemArt } from "@/components/item-art";
 import { agentIdentity } from "@/lib/agent-identity";
+import { AgentArena } from "@/components/agent-arena";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { MagicCard } from "@/components/ui/magic-card";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -41,9 +41,10 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
   const [bids, setBids] = useState<BidItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [soundOn, setSoundOn] = useState(true);
-  const [connected, setConnected] = useState(false);
   const [sold, setSold] = useState<{ amount: number; winner: string | null } | null>(null);
   const [committed, setCommitted] = useState<Record<string, number>>({});
+  const [lastBidder, setLastBidder] = useState<string | null>(null);
+  const [bidSeq, setBidSeq] = useState(0);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [tab, setTab] = useState<"agents" | "session">("agents");
   const reduce = useReducedMotion();
@@ -110,8 +111,6 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
 
   useEffect(() => {
     const es = new EventSource("/api/stream");
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
     es.onmessage = (m) => {
       let e: AuctionEvent;
       try { e = JSON.parse(m.data); } catch { return; }
@@ -129,6 +128,8 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
         case "bid":
           setBids((xs) => [{ key: nextKey(), label: e.label, amountMinor: e.amountMinor, agentId: e.bidder, at: Date.now() }, ...xs].slice(0, 10));
           setCommitted((c) => ({ ...c, [e.bidder]: e.amountMinor }));
+          setLastBidder(e.bidder);
+          setBidSeq((n) => n + 1);
           pushActivity("bid", `${e.label} bid ${formatMinor(e.amountMinor)}`);
           if (soundRef.current) playSfx("bid");
           break;
@@ -194,12 +195,7 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
       <header className="mb-5 flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-3">
           <span className="display-type text-[23px] font-semibold">commenda</span>
-          <span className="hidden text-xs text-muted sm:inline">agentic live auction</span>
         </div>
-        <span className="flex items-center gap-2 text-xs text-muted">
-          <span className={`h-1.5 w-1.5 rounded-full ${connected ? "live-dot bg-accent" : "bg-subtle"}`} />
-          {connected ? "live" : "connecting"}
-        </span>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -219,40 +215,35 @@ export function AuctionRoom({ agents }: { agents: AgentView[] }) {
               )}
             </AnimatePresence>
 
-            <div className="flex w-full items-center justify-between text-[11px]">
-              <span className="font-semibold tracking-[0.12em] text-muted">
-                {displayLot ? `LOT ${String(displayLot.id + 1).padStart(2, "0")} · ${displayLot.category.toUpperCase()}` : "STANDBY"}
-              </span>
-              <span className="text-subtle">{displayLot ? displayLot.title : "waiting for stream"}</span>
-            </div>
-
-            <div className="relative mb-3 mt-1 flex items-center justify-center">
-              <div className={`stage-ring absolute h-[260px] w-[260px] rounded-full sm:h-[290px] sm:w-[290px]`}
+            <div className="relative mb-1 mt-1 flex items-center justify-center">
+              <div className="stage-ring absolute h-[280px] w-[280px] rounded-full sm:h-[324px] sm:w-[324px]"
                 style={{ background: `conic-gradient(from 0deg, rgba(0,169,214,0.10), rgba(0,169,214,0.55), rgba(120,180,210,0.15))` }} />
-              <motion.div
-                animate={reduce ? {} : { rotate: 360 }}
-                transition={{ duration: 26, ease: "linear", repeat: Infinity }}
-                className="relative h-[230px] w-[230px] rounded-full shadow-[0_22px_60px_rgba(15,70,95,0.28)] sm:h-[260px] sm:w-[260px]"
-              >
-                {displayLot?.artSeed ? (
-                  <ItemArt seed={displayLot.artSeed} size={260} className="h-full w-full rounded-full" />
-                ) : (
-                  <div className="h-full w-full rounded-full bg-white/70" />
-                )}
-              </motion.div>
+              <AgentArena
+                members={agents.filter((a) => a.active)}
+                lot={displayLot}
+                lastBidder={lastBidder}
+                bidSeq={bidSeq}
+                reduce={Boolean(reduce)}
+              />
             </div>
 
             <div className="flex flex-col items-center text-center">
-              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Current bid</div>
-              {/* Number owns its own centered line; the unit sits below it, so
-                  the value reads as one locked object instead of drifting. */}
+              {/* Item name lives directly under the object — the focal hierarchy
+                  is: object → what it is → its price. */}
+              <div className="max-w-md text-[17px] font-medium leading-snug text-ink">
+                {displayLot?.title ?? "Preparing the next lot"}
+              </div>
               <NumberTicker
                 value={current / 1_000_000}
                 startValue={current / 1_000_000}
                 decimalPlaces={2}
-                className="mt-1 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold !text-ink"
+                className="mt-2 display-type text-[clamp(3.2rem,8vw,5.2rem)] font-semibold !text-ink"
               />
-              <div className="mt-1 text-[13px] font-medium uppercase tracking-[0.12em] text-muted">USDC</div>
+              {/* Arc pill meshes the currency with the chain this runs on. */}
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-accent/20 bg-accent/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-accent-deep">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                USDC <span className="text-accent/50">·</span> Arc
+              </div>
               {phase === "countdown" && (
                 <motion.div key={snap?.countdown} initial={{ opacity: 0.4, y: -4 }} animate={{ opacity: 1, y: 0 }}
                   className="mt-2 text-xl font-semibold text-accent">{snap?.countdown}s</motion.div>

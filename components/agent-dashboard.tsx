@@ -9,7 +9,6 @@ import { artSeedFor } from "@/lib/items/generator";
 const HoloCard = dynamic(() => import("@/components/HoloCard"), { ssr: false });
 const CircularCarousel = dynamic(() => import("@/components/CircularCarousel"), { ssr: false });
 
-type User = { id: string; name: string };
 type Policy = {
   budgetMinor: number;
   perBidCapMinor: number;
@@ -59,12 +58,10 @@ type Claim = {
 const CATEGORIES = ["electronics", "art", "collectibles"];
 
 export function AgentDashboard({ userName }: { userName: string }) {
-  const [users, setUsers] = useState<User[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [receipts, setReceipts] = useState<OnChainReceipt[]>([]);
-  const [ownerId, setOwnerId] = useState<string>("");
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
@@ -78,20 +75,18 @@ export function AgentDashboard({ userName }: { userName: string }) {
   });
 
   const refresh = useCallback(async () => {
-    const [u, s, c, r] = await Promise.all([
-      fetch("/api/users").then((r) => r.json()),
+    const [s, c, r] = await Promise.all([
       fetch("/api/sessions").then((r) => r.json()),
       fetch("/api/claims").then((r) => r.json()),
       fetch("/api/receipts").then((r) => r.json()),
     ]);
-    setUsers(u.users);
     setSessions(s.sessions);
     setClaims(c.claims);
     setReceipts(r.receipts ?? []);
-    setOwnerId((cur) => cur || u.users[0]?.id || "");
-    const a = await fetch(`/api/agents?owner=${encodeURIComponent(ownerId || u.users[0]?.id || "")}`).then((r) => r.json());
-    setAgents(a.agents);
-  }, [ownerId]);
+    // Server scopes agents to the session user; no client-supplied owner.
+    const a = await fetch("/api/agents").then((r) => r.json());
+    setAgents(a.agents ?? []);
+  }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -108,7 +103,6 @@ export function AgentDashboard({ userName }: { userName: string }) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        ownerId,
         label: form.label.trim(),
         budgetMinor,
         perBidCapMinor,
@@ -167,14 +161,7 @@ export function AgentDashboard({ userName }: { userName: string }) {
         <section className="flex flex-col gap-5">
           <div className="card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted">Signed in as (demo)</h2>
-              <select
-                value={ownerId}
-                onChange={(e) => { setOwnerId(e.target.value); setAgents([]); }}
-                className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink"
-              >
-                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+              <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted">Your agents</h2>
             </div>
 
             {agents.length === 0 ? (

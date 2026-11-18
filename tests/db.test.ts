@@ -59,6 +59,16 @@ describe("agent registry (SQLite)", () => {
     expect(repo.listAudit().some((e) => e.kind === "agent_created")).toBe(true);
   });
 
+  it("records bounded bid-decision audit entries (finding 3)", () => {
+    repo.recordAuditEvent(1000, "agent-1", "bid_bid", JSON.stringify({ detail: "approved 1000 minor units" }));
+    repo.recordAuditEvent(1001, "agent-2", "bid_reject", "x".repeat(2000));
+    const events = repo.listAudit(50);
+    const bidBid = events.find((e) => e.kind === "bid_bid");
+    const bidReject = events.find((e) => e.kind === "bid_reject");
+    expect(bidBid?.agentId).toBe("agent-1");
+    expect(bidReject?.detail.length).toBeLessThanOrEqual(500);
+  });
+
   it("creates and redeems a non-transferable claim", () => {
     const winner = repo.listAgents()[0].id;
     const claim = repo.createClaim({

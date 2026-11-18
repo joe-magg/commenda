@@ -9,7 +9,7 @@
  */
 import type { Address } from "viem";
 import { createChainAdapter, createTxResolver } from "./chain";
-import { resolveAll, type ResolveDeps } from "./inflight";
+import { mergeCommittedNext, escalateManual, resolveAll, type ResolveDeps } from "./inflight";
 import { reconcile } from "./reconcile";
 import { getRuntime } from "./runtime";
 
@@ -35,16 +35,18 @@ export function startResolver(): () => void {
     commit: async (entry, outcome) => {
       await state.globalLock.run(() => {
         if (outcome.status === "unknown") {
-          const cur = state.inFlight.get(entry.bidKey);
-          if (cur) state.inFlight.set(entry.bidKey, { ...cur, status: "needs_manual_intervention" });
+          escalateManual(state, entry);
           return; // retention is deliberate
         }
         if (outcome.status === "reverted") {
           const m = state.getMandate(entry.agentId);
           if (m) state.setMandate(entry.agentId, { ...m, consecutiveFailures: m.consecutiveFailures + 1 });
         } else {
-          // Apply the decision's committed next, then credit EVERY affected mandate.
-          state.setMandate(entry.agentId, entry.next);
+          // Apply the decision's committed next WITHOUT clobbering concurrent
+          // writes: policy from current, decide-managed from next, credits kept.
+          const cur = state.getMandate(entry.agentId);
+          state.setMandate(entry.agentId, mergeCommittedNext(cur, entry.next, entry.bid));
+          // Then credit EVERY affected mandate with the new events.
           const all = new Map(state.mandates);
           const r = reconcile(all, state.ingest, outcome.events, (addr) =>
             state.addressToAgent.get(addr.toLowerCase()) ?? addr.toLowerCase(),

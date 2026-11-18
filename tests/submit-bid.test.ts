@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AuctionState } from "../lib/auction/state";
-import { submitBid, commit, type ChainPort } from "../lib/auction/submit-bid";
+import { submitBid, commit, BroadcastError, type ChainPort } from "../lib/auction/submit-bid";
 import type { Bid, Mandate } from "../lib/auction/decide";
 
 const bid: Bid = { id: "b1", lotId: "lot-1", amountMinor: 1000, category: "electronics", seller: "seller-ok" };
@@ -80,6 +80,55 @@ describe("submitBid", () => {
     expect(r.status).toBe("no_agent");
   });
 
+  it("keeps a pending entry when the broadcast throws AFTER a hash (review 4.1)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const chain = fakeChain({
+      submitPlaceBid: async () => { throw new BroadcastError("receipt unavailable", "0xlost"); },
+    });
+    const r = await submitBid(s, bid, deps(chain));
+    expect(r.status).toBe("pending");
+    expect(r.status === "pending" && r.txHash).toBe("0xlost");
+    const e = [...s.inFlight.values()][0];
+    expect(e.txHash).toBe("0xlost");
+    expect(e.next.spentMinor).toBe(1000); // decide's next preserved for the resolver
+    expect(s.getMandate("agent-1")!.consecutiveFailures).toBe(0); // not a definite failure
+  });
+
+  it("treats a definite pre-hash failure as failed", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const chain = fakeChain({
+      submitPlaceBid: async () => { throw new Error("rpc down"); },
+    });
+    const r = await submitBid(s, bid, deps(chain));
+    expect(r.status).toBe("failed");
+    expect(s.inFlight.size).toBe(0);
+    expect(s.getMandate("agent-1")!.consecutiveFailures).toBe(1);
+  });
+
+  it("reports every decide() outcome via onDecision (finding 3)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const seen: string[] = [];
+    const r = await submitBid(s, bid, { ...deps(fakeChain()), onDecision: (a) => seen.push(a.rule) });
+    expect(r.status).toBe("placed");
+    expect(seen).toEqual(["BID"]);
+
+    const s2 = new AuctionState();
+    s2.setMandate("agent-1", mandate({ killSwitch: true }));
+    const rejected: string[] = [];
+    await submitBid(s2, bid, { ...deps(fakeChain()), onDecision: (a) => rejected.push(a.rule) });
+    expect(rejected).toEqual(["KILL_SWITCH"]);
+  });
+
+  it("survives an onDecision sink that throws (audit must never break bidding)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const r = await submitBid(s, bid, { ...deps(fakeChain()), onDecision: () => { throw new Error("db"); } });
+    expect(r.status).toBe("placed");
+  });
+
   it("applies outbid credits from synced events before deciding", async () => {
     const s = new AuctionState();
     s.setMandate("agent-1", mandate({ spentMinor: 2000 }));
@@ -103,14 +152,27 @@ describe("submitBid", () => {
 });
 
 describe("commit", () => {
-  it("merges next fields and preserves other mandate data", async () => {
+  it("applies event credits to the CURRENT mandate, preserving decide-managed state", async () => {
     const s = new AuctionState();
-    s.setMandate("agent-1", mandate({ spentMinor: 500 }));
-    const next = mandate({ spentMinor: 1500, seenKeys: new Set(["k"]) });
-    await commit(s, "agent-1", next, []);
+    s.setMandate("agent-1", mandate({ spentMinor: 2000, seenKeys: new Set(["k1"]) }));
+    const events = [{
+      kind: "BidPlaced" as const, lotId: 1n, bidder: "agent-2", amount: 2500n,
+      prevBidder: "agent-1", prevAmount: 2000n, seller: "seller-ok",
+      key: { blockNumber: 10n, logIndex: 0 },
+    }];
+    await commit(s, "agent-1", events);
     const m = s.getMandate("agent-1")!;
-    expect(m.spentMinor).toBe(1500);
-    expect(m.seenKeys.has("k")).toBe(true);
-    expect(m.watchlist.has("electronics")).toBe(true);
+    expect(m.spentMinor).toBe(0); // outbid credit applied
+    expect(m.seenKeys.has("k1")).toBe(true); // decide-managed state untouched
+  });
+
+  it("never adopts a caller-supplied stale snapshot (review 2.1)", async () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate({ spentMinor: 500, killSwitch: false }));
+    const staleNext = mandate({ spentMinor: 1500, killSwitch: true });
+    await commit(s, "agent-1", []);
+    const m = s.getMandate("agent-1")!;
+    expect(m.spentMinor).toBe(500); // unchanged by the discarded snapshot
+    expect(m.killSwitch).toBe(false);
   });
 });

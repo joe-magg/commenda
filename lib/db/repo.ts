@@ -157,6 +157,10 @@ function getClaim(id: string): Claim | undefined {
   } : undefined;
 }
 
+export function getClaimById(id: string): Claim | undefined {
+  return getClaim(id);
+}
+
 export function listClaims(winnerId?: string): Claim[] {
   const rows = (winnerId
     ? getDb().prepare("SELECT * FROM claims WHERE winner_id = ? ORDER BY created_at DESC").all(winnerId)
@@ -263,4 +267,11 @@ export function listAudit(limit = 20): { at: number; agentId: string | null; kin
   const rows = getDb().prepare("SELECT * FROM audit_events ORDER BY id DESC LIMIT ?").all(limit) as
     { at: number; agent_id: string | null; kind: string; detail: string }[];
   return rows.map((r) => ({ at: r.at, agentId: r.agent_id, kind: r.kind, detail: r.detail }));
+}
+
+/** Generic audit writer. Detail is bounded so a malformed caller cannot bloat the log. */
+export function recordAuditEvent(at: number, agentId: string, kind: string, detail: string): void {
+  getDb()
+    .prepare("INSERT INTO audit_events (at, agent_id, kind, detail) VALUES (?, ?, ?, ?)")
+    .run(at, agentId, kind.slice(0, 64), detail.slice(0, 500));
 }

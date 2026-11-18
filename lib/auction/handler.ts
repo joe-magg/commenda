@@ -40,6 +40,8 @@ export type HandlerDeps = {
   resolveAgentId: (payer: string) => string | null;
   now: () => number;
   getChain: () => SubmitBidDeps["chain"];
+  /** Optional audit sink for every decide() outcome (see SubmitBidDeps.onDecision). */
+  onDecision?: SubmitBidDeps["onDecision"];
 };
 
 /** Parse + validate the request body into a Bid, or null. */
@@ -62,6 +64,7 @@ export async function handleBid(
     resolveAgentId: deps.resolveAgentId,
     payer,
     now: deps.now,
+    onDecision: deps.onDecision,
   });
   return toHttp(result);
 }

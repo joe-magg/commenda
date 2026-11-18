@@ -67,10 +67,15 @@ export class AuctionState {
     return this.mandates.get(agentId);
   }
 
-  /** Is any submission currently in flight for this agent? */
+  /** Is an unresolved submission currently in flight for this agent?
+   *  Only `pending` blocks: a `needs_manual_intervention` entry is past its
+   *  resolution deadline (Arc finality makes "unknown" a stuck RPC, not a live
+   *  tx), so it must not wedge the agent into permanent `busy`. The entry
+   *  stays in the registry for observability; a late-confirming tx is still
+   *  reconciled through the event cursor. */
   hasInFlight(agentId: string): boolean {
     for (const entry of this.inFlight.values()) {
-      if (entry.agentId === agentId) return true;
+      if (entry.agentId === agentId && entry.status === "pending") return true;
     }
     return false;
   }

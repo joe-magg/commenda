@@ -6,7 +6,7 @@
 import { createPublicClient, createWalletClient, http, parseAbiItem, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { defineChain } from "viem";
-import type { ChainPort } from "./submit-bid";
+import { BroadcastError, type ChainPort } from "./submit-bid";
 import type { ChainEvent, EventKey } from "./reconcile";
 import type { Bid } from "./decide";
 
@@ -64,7 +64,6 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
   const accounts = new Map<string, ReturnType<typeof privateKeyToAccount>>();
   for (const [id, key] of Object.entries(config.agentKeys)) accounts.set(id, privateKeyToAccount(key));
   const approved = new Set<string>();
-  let lastBlock = 0n;
 
   /** One-time bounded approval per agent. Saves a whole tx + receipt wait per bid. */
   async function ensureAllowance(agentId: string, account: ReturnType<typeof privateKeyToAccount>): Promise<void> {
@@ -102,21 +101,37 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
       functionName: "placeBid",
       args: [BigInt(bid.lotId), BigInt(bid.amountMinor) as never, bid.seller as Address],
     });
-    // Arc has instant finality and the resolver already waits for the receipt
-    // authoritatively. Don't spend another RPC round trip here — hand it a
-    // bounded lookback from the block we just synced in this same request.
-    const fromBlock = lastBlock > 2n ? lastBlock - 2n : 0n;
+    // Await the receipt BEFORE returning "placed" (audit findings 7+8): a
+    // reverted placeBid must not yield HTTP 200 — x402 would settle the fee on
+    // 200, and the engine would credit a win from local state. On Arc
+    // (~500ms blocks, 250ms polling) this wait is sub-second.
+    let receipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
+    try {
+      receipt = await publicClient.waitForTransactionReceipt({ hash });
+    } catch {
+      // Post-hash failure (review 4.1): the tx exists but its outcome is
+      // unknown — throw BroadcastError so the caller keeps a pending in-flight
+      // entry instead of discarding decide's next.
+      throw new BroadcastError(`receipt unavailable: ${hash}`, hash);
+    }
+    if (receipt.status !== "success") {
+      // A mined revert is a DEFINITE failure: plain Error → "failed" → 502 →
+      // no fee settlement, and decide's next is correctly discarded.
+      console.warn("[commenda:chain] placeBid reverted", JSON.stringify({ agent: agentId, hash }));
+      throw new Error(`placeBid reverted: ${hash}`);
+    }
+    // Bounded lookback for the resolver's event sync, anchored at the receipt.
+    const fromBlock = receipt.blockNumber > 2n ? receipt.blockNumber - 2n : 0n;
     console.info("[commenda:chain] placeBid", JSON.stringify({
       agent: agentId,
       ms: Date.now() - start,
-      fromBlock: String(fromBlock),
+      block: String(receipt.blockNumber),
     }));
     return { txHash: hash, fromBlock };
   }
 
   async function syncEvents(fromBlock?: bigint): Promise<{ events: ChainEvent[]; latestBlock: bigint }> {
     const latest = await publicClient.getBlockNumber();
-    lastBlock = latest;
     const from = fromBlock ?? latest - 500n; // bounded lookback for the demo
     const logs = await publicClient.getLogs({
       address: config.escrowAddress,
@@ -195,4 +210,29 @@ export function createTxResolver(config: { rpcUrl?: string }) {
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as Hex });
     return { blockNumber: receipt.blockNumber, status: receipt.status };
   };
+}
+
+/**
+ * Authoritative on-chain winner for a lot (audit finding 8). The worker pool's
+ * `currentBidder` is "last completed local bid" and can be wrong when bid
+ * slots overlap — escrow state is the truth for claims and receipt mints.
+ * Returns null when no bid exists on the lot.
+ */
+export async function highestBidOnChain(
+  lotId: number,
+): Promise<{ bidder: string; amountMinor: number } | null> {
+  const escrow = process.env.ESCROW_ADDRESS;
+  if (!escrow) return null;
+  const publicClient = createPublicClient({ chain: arcTestnet, transport: rpc() });
+  const [bidder, amount] = await publicClient.readContract({
+    address: escrow as Address,
+    abi: [parseAbiItem("function getHighestBid(uint256) view returns (address bidder, uint96 amount, address seller)")],
+    functionName: "getHighestBid",
+    args: [BigInt(lotId)],
+  });
+  const zero = "0x0000000000000000000000000000000000000000";
+  if (bidder === zero) return null;
+  const minor = Number(amount); // uint96 USDC minor units — bounded by escrow caps
+  if (!Number.isSafeInteger(minor) || minor <= 0) return null;
+  return { bidder: bidder.toLowerCase(), amountMinor: minor };
 }

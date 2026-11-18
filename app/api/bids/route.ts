@@ -20,7 +20,7 @@ import { CircleFacilitator } from "@/lib/auction/circle-facilitator";
 import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
 import { getRuntime } from "@/lib/auction/runtime";
-import { listAgents } from "@/lib/db/repo";
+import { listAgents, recordAuditEvent } from "@/lib/db/repo";
 
 const NETWORK = "eip155:5042002" as const;
 const ROUTE_KEY = "/api/bids";
@@ -71,6 +71,15 @@ const deps: HandlerDeps = {
   resolveAgentId: (payer) => payerToAgent.get(payer.toLowerCase()) ?? null,
   now: () => Date.now(),
   getChain: chain,
+  // Every decide() outcome lands in audit_events (agent-side, audit-only detail).
+  onDecision: (audit) => {
+    recordAuditEvent(
+      Date.parse(audit.at),
+      audit.agentId,
+      `bid_${audit.rule.toLowerCase()}`,
+      JSON.stringify({ detail: audit.detail, lotId: audit.bid.lotId, amountMinor: audit.bid.amountMinor }),
+    );
+  },
 };
 
 /** Extract the authenticated payer from the x402 payment payload header. */

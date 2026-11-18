@@ -54,9 +54,10 @@ export type EngineHooks = {
 
 export const TIMING = {
   introMs: 3500,
-  // Server-side bid processing is now ~0.1-0.8s (250ms receipt polling, one-time
-  // allowance, no redundant receipt wait). The remaining ~3-4s is Circle's
-  // remote /verify + /settle. Space slots to that cadence so bids don't collide.
+  // Server-side bid processing is ~0.6-2s: x402 verify + placeBid + a receipt
+  // wait (sub-second on Arc) so a reverted bid can never be fee-settled or
+  // credited as a win. The remaining ~3-4s is Circle's remote /verify + /settle.
+  // Space slots to that cadence so bids don't collide.
   biddingMs: 15000,
   bidOffsetsMs: [1200, 4800, 8400, 12000],
   countdownMs: 5000,
@@ -204,12 +205,18 @@ export class AuctionEngine {
 
   private async runBidSlot(lot: Lot, slot: number): Promise<void> {
     if (!this.hooks.onBidSlot) return;
+    // Guard against stale continuations: next()/countdown can open a new lot
+    // while this hook is awaiting. If the on-chain lot id moved on, the outcome
+    // belongs to a lot that is already over — drop it instead of corrupting the
+    // new lot's bid state with the old lot's winner.
+    const chainLotIdAtStart = this.currentChainLotId;
     let outcome: BidOutcome | null;
     try {
       outcome = await this.hooks.onBidSlot(lot, slot, this.currentChainLotId);
     } catch {
       return; // driver errors are surfaced by the driver itself; never kill the show
     }
+    if (this.currentChainLotId !== chainLotIdAtStart) return;
     if (!outcome) return;
     if (!outcome.ok) {
       this.emit({ type: "reject", lotId: lot.id, agentId: outcome.agentId, rule: outcome.rule, amountMinor: outcome.amountMinor });
@@ -263,6 +270,11 @@ export class AuctionEngine {
     const amount = this.state.currentBidMinor;
     const winner = this.state.leaderLabel;
     const hasBids = amount > lot.openingMinor;
+    // If a manual Next() opened another lot while onSold was awaiting, this
+    // continuation is stale — the settle side effects (claims/mint) are keyed
+    // by chainLotId inside the hook and stay correct, but the emits below
+    // would overlay the OLD sale onto the NEW lot.
+    const chainLotIdAtStart = this.currentChainLotId;
 
     if (!hasBids) {
       // No bids: nothing to settle, no SOLD, no receipt — the lot simply passes.
@@ -272,6 +284,7 @@ export class AuctionEngine {
       let txHash: string | undefined;
       if (this.hooks.onSold) {
         try { txHash = await this.hooks.onSold(lot, amount, this.currentChainLotId); } catch { /* settle failure is surfaced in the log */ }
+        if (this.currentChainLotId !== chainLotIdAtStart) return;
       }
       this.emit({ type: "sold", lotId: lot.id, amountMinor: amount, winner, txHash });
       this.emit({ type: "snapshot", state: this.snapshot() });

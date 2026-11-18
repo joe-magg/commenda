@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AuctionEngine, TIMING, type AuctionEvent } from "../lib/auction/engine";
+import { AuctionEngine, TIMING, type AuctionEvent, type BidOutcome } from "../lib/auction/engine";
 
 describe("auction engine state machine", () => {
   let engine: AuctionEngine;
@@ -72,6 +72,49 @@ describe("auction engine state machine", () => {
     expect(events.some((e) => e.type === "unsold")).toBe(true);
     expect(events.some((e) => e.type === "sold")).toBe(false);
     expect(engine.snapshot().currentBidMinor).toBe(100_000); // opening ask, not a bid
+  });
+
+  it("does not double-advance or overlay a stale sale when Next fires during onSold (finding 6)", async () => {
+    let release!: (tx?: string) => void;
+    const gate = new Promise<string | undefined>((res) => { release = res; });
+    engine.setHooks({
+      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
+      onSold: () => gate,
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    // Run the countdown: finishLot starts and awaits the gated onSold.
+    await vi.advanceTimersByTimeAsync(TIMING.biddingMs - TIMING.bidOffsetsMs[0] + TIMING.countdownMs + 100);
+    expect(engine.snapshot().phase).toBe("sold");
+    expect(events.filter((e) => e.type === "sold").length).toBe(0);
+
+    engine.next(); // phase already "sold" -> advances immediately to lot 1
+    expect(engine.snapshot().lotIndex).toBe(1);
+    release("0xsettle"); // the old lot's settle completes late
+    await vi.advanceTimersByTimeAsync(TIMING.soldMs + 500);
+
+    // Exactly one advance: still on lot 1 — the stale continuation must not
+    // emit a sold overlay or schedule a second openLot (old code jumped to 2).
+    expect(engine.snapshot().lotIndex).toBe(1);
+    expect(events.filter((e) => e.type === "sold").length).toBe(0);
+  });
+
+  it("does not apply a late bid outcome to the next lot (stale runBidSlot)", async () => {
+    let release!: (v: BidOutcome) => void;
+    const gate = new Promise<BidOutcome>((res) => { release = res; });
+    engine.setHooks({
+      onBidSlot: async (_lot, slot) => (slot === 0 ? gate : null),
+    });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.bidOffsetsMs[0]);
+    // The slot hook is still pending; advance the show past this lot.
+    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs + 500);
+    expect(engine.snapshot().lotIndex).toBe(1);
+    release({ ok: true, amountMinor: 900_000, bidder: "0xlate", txHash: "0x9" });
+    await Promise.resolve();
+    // The stale outcome must NOT overwrite lot 1's bid state.
+    expect(engine.snapshot().currentBidMinor).toBe(100_000); // lot 1's opening ask
+    expect(engine.snapshot().leaderLabel).toBeNull();
   });
 
   it("gives each loop of a lot a fresh on-chain id", async () => {

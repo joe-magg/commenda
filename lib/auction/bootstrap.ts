@@ -4,13 +4,14 @@
  */
 import { getEngine } from "./engine";
 import { getWorkerPool } from "./worker-pool";
-import { settleOnChain } from "./chain";
+import { settleOnChain, highestBidOnChain } from "./chain";
 import { startResolver } from "./resolver-runner";
 import { speak } from "@/lib/voice/synth";
 import { createClaim, listSessions } from "@/lib/db/repo";
 import { itemsToLots, type GeneratedItem } from "@/lib/items/generator";
 import { buildReceiptUri } from "@/lib/items/art-uri";
 import { mintReceipt } from "./receipt-chain";
+import { getRuntime } from "./runtime";
 
 const g = globalThis as typeof globalThis & {
   __commendaResolver?: () => void;
@@ -35,22 +36,36 @@ export function ensureBootstrapped(): void {
     onBidSlot: (lot, slot, chainLotId) => pool.onBidSlot(lot, slot, chainLotId),
     speak: (lineId, args, lotIndex) => speak(lineId, args, lotIndex),
     onSold: async (lot, amount, chainLotId) => {
-      const winner = pool.winnerFor(chainLotId);
       const tx = await settleOnChain(chainLotId).catch(() => "");
+      // Winner + amount from ESCROW STATE, not the local pool (audit 4.2):
+      // the pool's currentBidder is "last completed local bid" and can be
+      // wrong when bid slots overlap; escrow holds whoever actually bid last.
+      let winner = pool.winnerFor(chainLotId);
+      let settledMinor = amount;
+      try {
+        const hb = await highestBidOnChain(chainLotId);
+        if (hb) {
+          const { state } = getRuntime();
+          winner = state.addressToAgent.get(hb.bidder) ?? hb.bidder;
+          settledMinor = hb.amountMinor;
+        }
+      } catch {
+        // keep the pool attribution if the read fails — demo continues
+      }
       if (winner) {
         createClaim({
           chainLotId,
           winnerId: winner,
           title: lot.title,
           sku: lot.sku,
-          amountMinor: amount,
+          amountMinor: settledMinor,
           settleTx: tx || null,
         });
         // Soulbound receipt — best effort: a mint failure must not stall the show.
         if (process.env.RECEIPT_NFT_ADDRESS) {
           try {
             const uri = buildReceiptUri(
-              { title: lot.title, sku: lot.sku, amountMinor: amount, artSeed: lot.artSeed },
+              { title: lot.title, sku: lot.sku, amountMinor: settledMinor, artSeed: lot.artSeed },
               winner,
             );
             const mint = await mintReceipt(chainLotId, winner, uri);

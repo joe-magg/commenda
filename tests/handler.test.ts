@@ -32,6 +32,12 @@ describe("toHttp — DTO allowlist (auditor M4)", () => {
     expect(toHttp({ status: "no_agent" }).code).toBe(403);
     expect(toHttp({ status: "failed", txHash: "" }).code).toBe(502);
   });
+
+  it("maps post-hash unknown outcomes to 200 pending (review 1b)", () => {
+    expect(toHttp({ status: "pending", txHash: "0xlost" })).toEqual({
+      code: 200, body: { status: "pending", txHash: "0xlost" },
+    });
+  });
 });
 
 describe("parseBid", () => {

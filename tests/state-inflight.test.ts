@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { AuctionState, Mutex, type InFlightEntry } from "../lib/auction/state";
-import { resolveEntry, resolveAll, type TxOutcome } from "../lib/auction/inflight";
+import { resolveEntry, resolveAll, escalateManual, mergeCommittedNext, type TxOutcome } from "../lib/auction/inflight";
 import { bidKey, type Bid, type Mandate } from "../lib/auction/decide";
 
 const bid: Bid = { id: "b1", lotId: "lot-1", amountMinor: 1000, category: "electronics", seller: "seller-ok" };
-const mandate = (): Mandate => ({
+const mandate = (over: Partial<Mandate> = {}): Mandate => ({
   agentId: "agent-1", budgetMinor: 10_000, spentMinor: 0, perBidCapMinor: 2_000,
   watchlist: new Set(["electronics"]), sellerAllowlist: new Set(["seller-ok"]),
   killSwitch: false, approvalEnabled: false, approvalAboveMinor: 1500,
   approvedKeys: new Set(), seenKeys: new Set(), consecutiveFailures: 0,
-  maxConsecutiveFailures: 3, recentBidTimesMs: [], maxBidsPerWindow: 20, windowMs: 60_000,
+  maxConsecutiveFailures: 3, recentBidTimesMs: [], maxBidsPerWindow: 20, windowMs: 60_000, ...over,
 });
 const entry = (over: Partial<InFlightEntry> = {}): InFlightEntry => ({
   bidKey: bidKey("agent-1", bid), agentId: "agent-1", txHash: "0xabc",
@@ -42,6 +42,65 @@ describe("AuctionState inFlight / BUSY", () => {
     expect(s.hasInFlight("agent-2")).toBe(false);
     s.removeInFlight(bidKey("agent-1", bid));
     expect(s.hasInFlight("agent-1")).toBe(false);
+  });
+
+  it("does NOT block on a manual entry (finding 4: no permanent busy wedge)", () => {
+    const s = new AuctionState();
+    s.addInFlight(entry({ status: "needs_manual_intervention" }));
+    expect(s.hasInFlight("agent-1")).toBe(false);
+    expect(s.inFlight.size).toBe(1); // registry keeps it for observability
+  });
+});
+
+describe("escalateManual (review 1.1/1.2)", () => {
+  it("charges conservatively and records the idempotency key", () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate());
+    const e = entry();
+    s.addInFlight(e);
+    escalateManual(s, e);
+    const m = s.getMandate("agent-1")!;
+    expect(m.spentMinor).toBe(bid.amountMinor);
+    expect(m.seenKeys.has(bidKey("agent-1", bid))).toBe(true);
+    expect(s.inFlight.get(e.bidKey)?.status).toBe("needs_manual_intervention");
+  });
+
+  it("never drives spentMinor negative", () => {
+    const s = new AuctionState();
+    s.setMandate("agent-1", mandate({ spentMinor: 0 }));
+    escalateManual(s, entry());
+    expect(s.getMandate("agent-1")!.spentMinor).toBe(bid.amountMinor);
+  });
+});
+
+describe("mergeCommittedNext (finding 5 / review 2.1)", () => {
+  it("takes policy (incl. killSwitch) from current, decide-managed from next", () => {
+    const cur = mandate({ killSwitch: true, budgetMinor: 5_000, spentMinor: 300 });
+    const next = mandate({ killSwitch: false, budgetMinor: 10_000, spentMinor: 1_300, seenKeys: new Set(["k2"]) });
+    const merged = mergeCommittedNext(cur, next, bid);
+    expect(merged.killSwitch).toBe(true); // pending bid must not resurrect a flipped switch
+    expect(merged.budgetMinor).toBe(5_000);
+    expect(merged.spentMinor).toBe(1_300); // current 300 + this bid 1000
+    expect(merged.seenKeys.has("k2")).toBe(true);
+  });
+
+  it("unions seenKeys so a conservative manual key is never un-recorded", () => {
+    const cur = mandate({ seenKeys: new Set(["k-manual"]) });
+    const next = mandate({ seenKeys: new Set(["k-new"]) });
+    const merged = mergeCommittedNext(cur, next, bid);
+    expect(merged.seenKeys.has("k-manual")).toBe(true);
+    expect(merged.seenKeys.has("k-new")).toBe(true);
+  });
+
+  it("clamps spentMinor at zero when credits drove current to zero", () => {
+    const cur = mandate({ spentMinor: 0 });
+    const merged = mergeCommittedNext(cur, mandate({ spentMinor: 1000 }), bid);
+    expect(merged.spentMinor).toBe(1000);
+  });
+
+  it("returns next unchanged when no current mandate exists", () => {
+    const next = mandate({ spentMinor: 1000 });
+    expect(mergeCommittedNext(undefined, next, bid)).toBe(next);
   });
 });
 

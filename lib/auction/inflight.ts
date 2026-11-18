@@ -8,6 +8,30 @@
  */
 import type { AuctionState, InFlightEntry } from "./state";
 import type { ChainEvent } from "./reconcile";
+import { bidKey, type Bid, type Mandate } from "./decide";
+
+/**
+ * Merge a resolver-confirmed decision's `next` into the CURRENT mandate without
+ * losing concurrent writes (audit finding 5 + review 2.1):
+ *  - policy fields (budget, caps, watchlists, killSwitch, approval) come from
+ *    `current` — a pending bid must never resurrect a flipped kill switch or
+ *    revert a mid-flight policy change;
+ *  - decide-managed fields come from `next`; seenKeys is UNIONED so a
+ *    conservative manual-escalation key can never be un-recorded;
+ *  - spentMinor = current (credit-adjusted) + this bid's amount — the only
+ *    delta decide() contributed, since the per-agent lock serializes decides.
+ */
+export function mergeCommittedNext(current: Mandate | undefined, next: Mandate, bid: Bid): Mandate {
+  if (!current) return next;
+  return {
+    ...current,
+    spentMinor: Math.max(0, current.spentMinor + bid.amountMinor),
+    seenKeys: new Set([...current.seenKeys, ...next.seenKeys]),
+    approvedKeys: next.approvedKeys,
+    recentBidTimesMs: next.recentBidTimesMs,
+    consecutiveFailures: next.consecutiveFailures,
+  };
+}
 
 export type TxOutcome =
   | { status: "success"; blockNumber: bigint; events: ChainEvent[] }
@@ -22,6 +46,28 @@ export type ResolveDeps = {
   now: () => number;
   deadlineMs?: number;
 };
+
+/**
+ * Conservative commit for an entry whose outcome is unknowable past the
+ * deadline (review 1.1/1.2): the tx may still confirm, so count the spend and
+ * record the idempotency key NOW. A released agent must never under-count its
+ * budget or re-submit the identical bid. Over-counting on a late revert is the
+ * safe direction — on-chain refunds still credit via the event cursor if the
+ * tx confirms later.
+ * MUST run under the global lock.
+ */
+export function escalateManual(state: AuctionState, entry: InFlightEntry): void {
+  const cur = state.inFlight.get(entry.bidKey);
+  if (cur) state.inFlight.set(entry.bidKey, { ...cur, status: "needs_manual_intervention" });
+  const m = state.getMandate(entry.agentId);
+  if (m) {
+    state.setMandate(entry.agentId, {
+      ...m,
+      spentMinor: Math.max(0, m.spentMinor + entry.bid.amountMinor),
+      seenKeys: new Set(m.seenKeys).add(bidKey(entry.agentId, entry.bid)),
+    });
+  }
+}
 
 /** Resolve one entry. Returns what happened to it. */
 export async function resolveEntry(

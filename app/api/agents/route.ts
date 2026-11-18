@@ -1,6 +1,8 @@
-/** Agent registry API — users own agents with typed policies. */
+/** Agent registry API — signed-in users own agents with typed policies. */
+import { currentUser } from "@/lib/auth";
 import { createAgent, listAgents, type Policy } from "@/lib/db/repo";
 import { DEMO_SELLER } from "@/lib/auction/lots";
+import { syncAgentPolicy } from "@/lib/auction/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,19 +10,24 @@ export const dynamic = "force-dynamic";
 const isPosInt = (x: unknown): x is number =>
   typeof x === "number" && Number.isSafeInteger(x) && x > 0;
 
-export async function GET(req: Request): Promise<Response> {
-  const owner = new URL(req.url).searchParams.get("owner") ?? undefined;
-  return Response.json({ agents: listAgents(owner) });
+export async function GET(): Promise<Response> {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "not signed in" }, { status: 401 });
+  // Owner is always the session user — never a client-supplied id.
+  return Response.json({ agents: listAgents(user.id) });
 }
 
 export async function POST(req: Request): Promise<Response> {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "not signed in" }, { status: 401 });
+
   let body: Record<string, unknown>;
   try { body = (await req.json()) as Record<string, unknown>; } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const { ownerId, label, budgetMinor, perBidCapMinor, watchlist, approvalEnabled, approvalAboveMinor, maxWins } = body;
-  if (typeof ownerId !== "string" || !ownerId) return Response.json({ error: "ownerId required" }, { status: 400 });
+  // ownerId comes from the session, never from the request body.
+  const { label, budgetMinor, perBidCapMinor, watchlist, approvalEnabled, approvalAboveMinor, maxWins } = body;
   if (typeof label !== "string" || label.trim().length < 1 || label.length > 40) {
     return Response.json({ error: "label must be 1-40 chars" }, { status: 400 });
   }
@@ -36,6 +43,11 @@ export async function POST(req: Request): Promise<Response> {
   if (!Number.isSafeInteger(maxWins) || (maxWins as number) < 1 || (maxWins as number) > 20) {
     return Response.json({ error: "maxWins must be 1-20" }, { status: 400 });
   }
+  // Keep decide()'s INVALID_MANDATE invariant out of the way at creation time:
+  // with approvals on, the threshold must sit strictly below the per-bid cap.
+  if (approvalEnabled && !((approvalAboveMinor as number) > 0 && (approvalAboveMinor as number) < (perBidCapMinor as number))) {
+    return Response.json({ error: "approvalAboveMinor must be in (0, perBidCapMinor) when approvals are on" }, { status: 400 });
+  }
 
   const policy: Policy = {
     budgetMinor,
@@ -48,10 +60,13 @@ export async function POST(req: Request): Promise<Response> {
   };
 
   const { agent, apiKey } = createAgent({
-    ownerId,
+    ownerId: user.id,
     label: label.trim(),
     walletAddress: null, // no wallet key -> standby until funded in a later phase
     policy,
   });
+  // Register the policy with the guardrail runtime so decide() sees it
+  // immediately — awaited so the 201 never precedes the mandate's existence.
+  await syncAgentPolicy(agent);
   return Response.json({ agent, apiKey }, { status: 201 });
 }

@@ -47,8 +47,9 @@ export type ChainAdapterConfig = {
   escrowAddress: Address;
   /** Server-held agent wallets keyed by agentId (demo keys; testnet only). */
   agentKeys: Record<string, `0x${string}`>;
-  /** Per-agent USDC allowance to pre-approve to escrow (minor units). */
-  allowances?: Record<string, number>;
+  /** Per-agent USDC allowance to pre-approve to escrow (minor units). Read
+   *  lazily so agents created after boot (and policy edits) are honoured. */
+  allowances?: Record<string, number> | ((agentId: string) => number);
   rpcUrl?: string;
   timeoutMs?: number;
 };
@@ -61,8 +62,17 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
     pollingInterval: POLL_MS,
   });
 
+  // Lazy: agentKeys is the live runtime key map, which gains user agents
+  // (derived keys) after boot.
   const accounts = new Map<string, ReturnType<typeof privateKeyToAccount>>();
-  for (const [id, key] of Object.entries(config.agentKeys)) accounts.set(id, privateKeyToAccount(key));
+  const accountFor = (id: string) => {
+    let a = accounts.get(id);
+    const key = config.agentKeys[id];
+    if (!a && key) { a = privateKeyToAccount(key); accounts.set(id, a); }
+    return a;
+  };
+  const allowanceFor = (id: string) =>
+    typeof config.allowances === "function" ? config.allowances(id) : (config.allowances?.[id] ?? 0);
   const approved = new Set<string>();
 
   /** One-time bounded approval per agent. Saves a whole tx + receipt wait per bid. */
@@ -75,7 +85,7 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
       functionName: "allowance",
       args: [account.address, config.escrowAddress],
     });
-    const desired = BigInt(config.allowances?.[agentId] ?? 0);
+    const desired = BigInt(allowanceFor(agentId));
     if (desired > 0n && BigInt(current) < desired) {
       const hash = await wallet.writeContract({
         address: USDC_ARC,
@@ -90,7 +100,7 @@ export function createChainAdapter(config: ChainAdapterConfig): ChainPort {
 
   async function submitPlaceBid(bid: Bid, agentId: string): Promise<{ txHash: string; fromBlock: bigint }> {
     const start = Date.now();
-    const account = accounts.get(agentId);
+    const account = accountFor(agentId);
     if (!account) throw new Error(`no server wallet for agent ${agentId}`);
     const wallet = createWalletClient({ account, chain: arcTestnet, transport: rpc(config.timeoutMs) });
     await ensureAllowance(agentId, account);

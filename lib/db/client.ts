@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS audit_events (
   kind TEXT NOT NULL,
   detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS open_lots (
+  chain_lot_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  art_seed TEXT,
+  opened_at INTEGER NOT NULL,
+  closed_at INTEGER
+);
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_events(agent_id);
 `;
@@ -79,7 +87,7 @@ function seed(d: DatabaseSync): void {
     "INSERT INTO agents (id, owner_id, label, wallet_address, enabled, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   const insertPolicy = d.prepare(
-    "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins, strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
 
   // Every agent is its own principal: one user per agent, each with their own
@@ -102,6 +110,7 @@ function seed(d: DatabaseSync): void {
       c.approvalEnabled ? 1 : 0,
       c.approvalAboveMinor,
       1, // maxWins — stop after one item won
+      (c as { strategy?: string }).strategy ?? "steady",
     );
   });
 
@@ -125,6 +134,15 @@ export function getDb(): DatabaseSync {
   const cols = db.prepare("PRAGMA table_info(agent_policies)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "max_wins")) {
     db.exec("ALTER TABLE agent_policies ADD COLUMN max_wins INTEGER NOT NULL DEFAULT 1");
+  }
+  const lotCols = db.prepare("PRAGMA table_info(open_lots)").all() as { name: string }[];
+  if (!lotCols.some((c) => c.name === "winner_id")) {
+    db.exec("ALTER TABLE open_lots ADD COLUMN winner_id TEXT");
+    db.exec("ALTER TABLE open_lots ADD COLUMN sold_minor INTEGER");
+    db.exec("ALTER TABLE open_lots ADD COLUMN category TEXT");
+  }
+  if (!cols.some((c) => c.name === "strategy")) {
+    db.exec("ALTER TABLE agent_policies ADD COLUMN strategy TEXT NOT NULL DEFAULT 'steady'");
   }
   seed(db);
   return db;

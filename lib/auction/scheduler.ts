@@ -15,35 +15,45 @@
  */
 import { getEngine, type AuctionEvent } from "./engine";
 import { getWorkerPool } from "./worker-pool";
-import { settleOnChain } from "./chain";
-import { createSession, listClaims, setSessionStatus } from "@/lib/db/repo";
+import { settleLot } from "./settlement";
+import { createSession, endStaleSessions, listOpenLots, setSessionStatus } from "@/lib/db/repo";
 import { generateCatalog, itemsToLots, type GeneratedItem } from "@/lib/items/generator";
 
-const ITEMS_PER_AUCTION = Math.max(1, Number(process.env.AUCTION_ITEMS ?? 3));
+const ITEMS_PER_AUCTION = Math.min(9, Math.max(1, Number(process.env.AUCTION_ITEMS ?? 3)));
 const GAP_MS = Math.max(30_000, Number(process.env.AUCTION_GAP_MINUTES ?? 5) * 60_000);
 const START_DELAY_MS = Math.max(5_000, Number(process.env.AUCTION_START_DELAY_MS ?? 45_000));
 
-/** Best-effort settle of lots that never finished (crash recovery). */
-export async function recoverUnsettledLots(): Promise<number> {
-  const unsettled = listClaims().filter((c) => c.status === "issued" && !c.settleTx);
+/**
+ * Settle every lot the engine opened but never closed (crash recovery). The
+ * open_lots table is written at lot open, so this covers lots interrupted
+ * mid-bidding — not just lots that reached SOLD. Lots with no bids are
+ * simply closed. Failures leave the lot open for the next pass.
+ */
+export async function recoverUnsettledLots(skipChainLotId?: number): Promise<number> {
   let recovered = 0;
-  for (const claim of unsettled) {
-    const lotId = Number(claim.chainLotId);
-    if (!Number.isSafeInteger(lotId)) continue;
+  for (const lot of listOpenLots()) {
+    if (lot.chainLotId === skipChainLotId) continue; // the live lot
     try {
-      const tx = await settleOnChain(lotId); // idempotent: skips already-settled lots
-      if (tx) {
+      const r = await settleLot(lot);
+      if (r.winnerId) {
         recovered++;
-        console.info("[commenda:scheduler] recovered unsettled lot", JSON.stringify({ lotId, tx }));
+        console.info("[commenda:scheduler] recovered lot", JSON.stringify({ lotId: lot.chainLotId, tx: r.tx }));
       }
     } catch (e) {
-      // An empty or already-settled lot reverts — recovery is best-effort.
-      console.warn("[commenda:scheduler] recovery settle skipped", JSON.stringify({
-        lotId, reason: e instanceof Error ? e.message.slice(0, 80) : "unknown",
+      console.warn("[commenda:scheduler] recovery settle deferred", JSON.stringify({
+        lotId: lot.chainLotId, reason: e instanceof Error ? e.message.slice(0, 80) : "unknown",
       }));
     }
   }
   return recovered;
+}
+
+type SchedulerControl = { startNow: () => boolean };
+const ctl = globalThis as typeof globalThis & { __commendaSchedulerCtl?: SchedulerControl };
+
+/** Skip the intermission and start the next auction now (demo control). */
+export function startNextAuctionNow(): boolean {
+  return ctl.__commendaSchedulerCtl?.startNow() ?? false;
 }
 
 export function startAuctionScheduler(): () => void {
@@ -53,9 +63,18 @@ export function startAuctionScheduler(): () => void {
 
   const engine = getEngine();
   const pool = getWorkerPool();
+  endStaleSessions();
   let sessionIdx = 0;
   let stopped = false;
   let stopWaiting: (() => void) | null = null;
+  let sleeping = false;
+  ctl.__commendaSchedulerCtl = {
+    startNow: () => {
+      if (!sleeping || !stopWaiting) return false;
+      stopWaiting();
+      return true;
+    },
+  };
 
   /** Resolve when the engine emits auction_end (or immediately if it already did). */
   function waitAuctionEnd(): Promise<void> {
@@ -72,23 +91,34 @@ export function startAuctionScheduler(): () => void {
     });
   }
 
+  /** The next auction is published at the START of the intermission — the
+   *  Sotheby's model: bidders (and viewers) see the catalog before it runs. */
+  let upcoming: { id: string; name: string; items: GeneratedItem[] } | null = null;
+  function publishNext(): void {
+    const items = generateCatalog(`commenda-session-${Date.now().toString(36)}`, ITEMS_PER_AUCTION)
+      .map((item: GeneratedItem, i: number) => ({ ...item, id: i }));
+    const name = `Flash Auction #${sessionIdx + 1}`;
+    const session = createSession(name, items, "scheduled");
+    upcoming = { id: session.id, name, items };
+  }
+
   async function runAuction(): Promise<void> {
     sessionIdx++;
-    const catalog = generateCatalog(`commenda-session-${Date.now().toString(36)}`, ITEMS_PER_AUCTION)
-      .map((item: GeneratedItem, i: number) => ({ ...item, id: i }));
-    const items = catalog as GeneratedItem[];
-    const session = createSession(`Flash Auction #${sessionIdx}`, items);
+    if (!upcoming) publishNext();
+    const { id, name, items } = upcoming!;
+    upcoming = null;
+    setSessionStatus(id, "live");
     console.info("[commenda:scheduler] starting auction", JSON.stringify({
-      session: session.id, items: items.length, gapMinutes: GAP_MS / 60_000,
+      session: id, items: items.length, gapMinutes: GAP_MS / 60_000,
     }));
 
     pool.resetCycle();
-    engine.setLots(itemsToLots(items));
+    engine.setLots(itemsToLots(items), name);
     engine.start();
 
     await waitAuctionEnd();
-    setSessionStatus(session.id, "ended");
-    console.info("[commenda:scheduler] auction ended", JSON.stringify({ session: session.id }));
+    setSessionStatus(id, "ended");
+    console.info("[commenda:scheduler] auction ended", JSON.stringify({ session: id }));
   }
 
   async function loop(): Promise<void> {
@@ -96,10 +126,16 @@ export function startAuctionScheduler(): () => void {
       try {
         // Sleep first: START_DELAY before the very first auction, the gap
         // between subsequent ones. Recovery runs in that window too.
+        const ms = sessionIdx === 0 ? START_DELAY_MS : GAP_MS;
+        publishNext();
+        engine.setNextAuctionAt(Date.now() + ms);
+        sleeping = true;
         await new Promise<void>((r) => {
-          const t = setTimeout(r, sessionIdx === 0 ? START_DELAY_MS : GAP_MS);
+          const t = setTimeout(r, ms);
           stopWaiting = () => { clearTimeout(t); r(); };
         });
+        sleeping = false;
+        stopWaiting = null;
         if (stopped) return;
         const recovered = await recoverUnsettledLots();
         if (recovered > 0) {
@@ -110,6 +146,7 @@ export function startAuctionScheduler(): () => void {
         console.warn("[commenda:scheduler] cycle failed — retrying after gap", JSON.stringify({
           reason: e instanceof Error ? e.message.slice(0, 120) : "unknown",
         }));
+        sleeping = false;
         await new Promise<void>((r) => { setTimeout(r, GAP_MS); stopWaiting = () => r(); });
       }
     }

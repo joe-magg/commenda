@@ -19,6 +19,8 @@
   --color-accent: #00a9d6;
   --color-accent-deep: #007f9f;
   --color-win: #b8862b;
+  /* Guardrail blocks: amber, never red — enforcement reads as protection, not error. */
+  --color-guard: #b45309;
   --radius-card: 20px;
   --radius-glass: 26px;
 

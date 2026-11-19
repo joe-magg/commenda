@@ -31,7 +31,7 @@ describe("agent registry (SQLite)", () => {
   it("creates and closes auction sessions", () => {
     const before = repo.listSessions().length;
     const session = repo.createSession("Test Auction", [
-      { id: 0, title: "A", sku: "A-1", category: "art", condition: "new", provenance: "x", artSeed: "aaaa", openingMinor: 100_000 },
+      { id: 0, title: "A", sku: "A-1", category: "art", artSeed: "aaaa", openingMinor: 100_000 },
     ]);
     expect(session.status).toBe("live");
     expect(repo.listSessions().length).toBe(before + 1);
@@ -60,6 +60,7 @@ describe("agent registry (SQLite)", () => {
         approvalEnabled: false,
         approvalAboveMinor: 0,
         maxWins: 1,
+        strategy: "steady",
       },
     });
     expect(agent.label).toBe("Test Bidder");

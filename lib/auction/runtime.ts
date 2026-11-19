@@ -5,7 +5,9 @@
  */
 import { AuctionState } from "./state";
 import { parseAgentConfig, seedState, derivePayerMap, deriveAgentKeys, buildMandate, type AgentConfig } from "./seed";
-import type { Agent } from "@/lib/db/repo";
+import { listAgents, type Agent } from "@/lib/db/repo";
+import { deriveAgentKey } from "@/lib/agents/wallets";
+import type { Mandate } from "./decide";
 import agentConfigRaw from "@/config/agents.json";
 
 export type Runtime = {
@@ -23,14 +25,46 @@ export function getRuntime(): Runtime {
     let envKeys: unknown = {};
     try { envKeys = JSON.parse(process.env.AGENT_KEYS ?? "{}"); } catch { /* kill-switched */ }
     const summary = seedState(state, configs, envKeys);
-    console.info("[commenda] seeded agents:", summary.seeded.length, "kill-switched:", summary.killSwitched.length);
-    g.__commendaRuntime = {
-      state,
-      payer: derivePayerMap(configs),
-      keys: deriveAgentKeys(configs, envKeys),
-    };
+    const keys = deriveAgentKeys(configs, envKeys);
+    // The DB is the source of truth for owner-edited policy once seeded:
+    // without this overlay, a cap an owner tightened on the dashboard would
+    // silently revert to the config value on every restart.
+    let overlaid = 0;
+    const payer = derivePayerMap(configs);
+    try {
+      for (const agent of listAgents()) {
+        const m = state.getMandate(agent.id);
+        if (m) {
+          state.setMandate(agent.id, withPolicy(m, agent, Boolean(keys[agent.id])));
+        } else {
+          // A user-created agent: its key is derived, never stored.
+          registerAgent(state, payer, keys, agent);
+        }
+        overlaid++;
+      }
+    } catch (e) {
+      console.warn("[commenda] policy overlay skipped", e instanceof Error ? e.message.slice(0, 80) : e);
+    }
+    console.info("[commenda] seeded agents:", summary.seeded.length, "kill-switched:", summary.killSwitched.length, "db policies:", overlaid);
+    g.__commendaRuntime = { state, payer, keys };
   }
   return g.__commendaRuntime;
+}
+
+/** Policy fields from the DB onto a live mandate; decide-managed state kept.
+ *  A paused agent (or one without a signing key) is kill-switched, so pausing
+ *  on the dashboard stops x402 bids from ANY client, not just the pool. */
+export function withPolicy(m: Mandate, agent: Agent, hasKey: boolean): Mandate {
+  return {
+    ...m,
+    budgetMinor: agent.policy.budgetMinor,
+    perBidCapMinor: agent.policy.perBidCapMinor,
+    watchlist: new Set(agent.policy.watchlist.map((v) => v.toLowerCase())),
+    sellerAllowlist: new Set(agent.policy.sellerAllowlist.map((v) => v.toLowerCase())),
+    approvalEnabled: agent.policy.approvalEnabled,
+    approvalAboveMinor: agent.policy.approvalAboveMinor,
+    killSwitch: !agent.enabled || !hasKey,
+  };
 }
 
 /**
@@ -43,40 +77,48 @@ export function getRuntime(): Runtime {
 export async function syncAgentPolicy(agent: Agent): Promise<void> {
   const rt = getRuntime();
   const state = rt.state;
-  const watchlist = new Set(agent.policy.watchlist.map((v) => v.toLowerCase()));
-  const sellerAllowlist = new Set(agent.policy.sellerAllowlist.map((v) => v.toLowerCase()));
   await state.globalLock.run(() => {
     const existing = state.getMandate(agent.id);
     if (existing) {
-      state.setMandate(agent.id, {
-        ...existing,
-        budgetMinor: agent.policy.budgetMinor,
-        perBidCapMinor: agent.policy.perBidCapMinor,
-        watchlist,
-        sellerAllowlist,
-        approvalEnabled: agent.policy.approvalEnabled,
-        approvalAboveMinor: agent.policy.approvalAboveMinor,
-      });
+      state.setMandate(agent.id, withPolicy(existing, agent, Boolean(rt.keys[agent.id])));
       return;
     }
-    const config: AgentConfig = {
-      id: agent.id,
-      payer: agent.walletAddress ? agent.walletAddress.toLowerCase() : agent.id,
-      budgetMinor: agent.policy.budgetMinor,
-      perBidCapMinor: agent.policy.perBidCapMinor,
-      watchlist: [...watchlist],
-      sellerAllowlist: [...sellerAllowlist],
-      approvalEnabled: agent.policy.approvalEnabled,
-      approvalAboveMinor: agent.policy.approvalAboveMinor,
-    };
-    state.setMandate(agent.id, buildMandate(config, !rt.keys[agent.id]));
-    state.addressToAgent.set(agent.id, agent.id);
-    if (agent.walletAddress) {
-      state.addressToAgent.set(agent.walletAddress.toLowerCase(), agent.id);
-    }
-    // Resolution uses runtime.payer (payer address -> agent id); a new agent
-    // must be resolvable there too or it can never reach decide().
-    if (agent.walletAddress) rt.payer.set(agent.walletAddress.toLowerCase(), agent.id);
-    else rt.payer.set(agent.id, agent.id);
+    registerAgent(state, rt.payer, rt.keys, agent);
   });
+}
+
+/** Register a brand-new agent with the guardrail runtime: its mandate, its
+ *  derived key (user agents), and the address maps decide()/reconcile use.
+ *  Kill-switched until it has a key AND its owner has enabled it. */
+function registerAgent(
+  state: Runtime["state"],
+  payer: Runtime["payer"],
+  keys: Runtime["keys"],
+  agent: Agent,
+): void {
+  const derived = deriveAgentKey(agent.id);
+  if (derived && !keys[agent.id]) keys[agent.id] = derived;
+  const config: AgentConfig = {
+    id: agent.id,
+    payer: agent.walletAddress ? agent.walletAddress.toLowerCase() : agent.id,
+    budgetMinor: agent.policy.budgetMinor,
+    perBidCapMinor: agent.policy.perBidCapMinor,
+    watchlist: agent.policy.watchlist.map((v) => v.toLowerCase()),
+    sellerAllowlist: agent.policy.sellerAllowlist.map((v) => v.toLowerCase()),
+    approvalEnabled: agent.policy.approvalEnabled,
+    approvalAboveMinor: agent.policy.approvalAboveMinor,
+  };
+  state.setMandate(agent.id, withPolicy(buildMandate(config, true), agent, Boolean(keys[agent.id])));
+  state.addressToAgent.set(agent.id, agent.id);
+  if (agent.walletAddress) {
+    state.addressToAgent.set(agent.walletAddress.toLowerCase(), agent.id);
+    payer.set(agent.walletAddress.toLowerCase(), agent.id);
+  } else {
+    payer.set(agent.id, agent.id);
+  }
+}
+
+/** The signing key for any agent the server may sign for, or undefined. */
+export function keyFor(agentId: string): `0x${string}` | undefined {
+  return getRuntime().keys[agentId];
 }

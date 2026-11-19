@@ -1,9 +1,9 @@
 {
   "_comment": "Voice guardrails. 'Credits' here are billed-character equivalents (ElevenLabs free tier = 10,000 chars). No secrets.",
-  "maxCreditsPerSession": 6000,
+  "maxCreditsPerSession": 45000,
   "billedCharsPerRawChar": 3,
-  "maxGenerationsPerLot": 12,
-  "maxRequestsPerMinute": 20,
+  "maxGenerationsPerLot": 40,
+  "maxRequestsPerMinute": 40,
   "maxConsecutiveFailures": 3,
   "maxCharsPerRequest": 200,
   "killSwitch": false,

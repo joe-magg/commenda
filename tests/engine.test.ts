@@ -1,123 +1,184 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AuctionEngine, TIMING, type AuctionEvent, type BidOutcome } from "../lib/auction/engine";
+import { AuctionEngine, TIMING, type AuctionEvent, type BidOutcome, type RoundContext } from "../lib/auction/engine";
+import type { Lot } from "../lib/auction/lots";
 
-describe("auction engine state machine", () => {
+const mkLots = (n: number): Lot[] =>
+  Array.from({ length: n }, (_, i) => ({
+    id: i, chainId: 1_000_000 + i, title: `Item ${i}`, category: "electronics" as const,
+    seller: "0x3333333333333333333333333333333333333333", openingMinor: 100_000,
+    accent: "#000", sku: `SKU-${i}`, artSeed: "abcd",
+  }));
+
+let tx = 0;
+const placed = (amountMinor: number, bidder = "0xabc"): BidOutcome =>
+  ({ ok: true, amountMinor, bidder, txHash: `0x${++tx}` });
+
+/** Long enough for one quiet lot: intro + countdown + sold + slack. */
+const QUIET_LOT = TIMING.introMs + TIMING.countdownMs + TIMING.soldMs + 2_000;
+
+describe("auction engine — the floor", () => {
   let engine: AuctionEngine;
   let events: AuctionEvent[];
-  let unsub: () => void;
 
   beforeEach(() => {
     vi.useFakeTimers();
     engine = new AuctionEngine();
+    engine.setLots(mkLots(3), "Test Auction");
     events = [];
-    unsub = engine.subscribe((e) => events.push(e));
+    engine.subscribe((e) => events.push(e));
   });
 
-  afterEach(() => {
-    unsub();
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it("opens a lot in intro, then moves to bidding", async () => {
+    engine.setHooks({ onBidSlot: () => new Promise(() => {}) });
     engine.start();
     expect(engine.snapshot().phase).toBe("intro");
     expect(events.some((e) => e.type === "lot_open")).toBe(true);
+    expect(events.some((e) => e.type === "auction_start")).toBe(true);
     await vi.advanceTimersByTimeAsync(TIMING.introMs);
     expect(engine.snapshot().phase).toBe("bidding");
   });
 
-  it("applies a successful bid to the current amount", async () => {
-    engine.setHooks({
-      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
-    });
+  it("keeps asking while agents raise, then counts down when the room goes quiet", async () => {
+    const amounts = [200_000, 300_000, 400_000];
+    let round = 0;
+    engine.setHooks({ onBidSlot: async () => (round < amounts.length ? placed(amounts[round++], `0x${round}`) : null) });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    expect(engine.snapshot().currentBidMinor).toBe(200_000);
-    expect(engine.snapshot().leaderLabel).toBeTruthy();
-    expect(events.some((e) => e.type === "bid")).toBe(true);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 3 * (TIMING.slotGapMs + 10));
+    expect(engine.snapshot().bidCount).toBe(3);
+    expect(engine.snapshot().currentBidMinor).toBe(400_000);
+    await vi.advanceTimersByTimeAsync(TIMING.slotGapMs);
+    expect(engine.snapshot().phase).toBe("countdown");
   });
 
-  it("surfaces guardrail rejections without changing the bid", async () => {
+  it("is driven by agents, not a fixed slot count", async () => {
+    let round = 0;
+    engine.setHooks({ onBidSlot: async () => (round < 9 ? placed(200_000 + 100_000 * round++, `0x${round}`) : null) });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 10 * (TIMING.slotGapMs + 10));
+    expect(engine.snapshot().bidCount).toBe(9); // old engine stopped at 4
+  });
+
+  it("soft close: a bid during the countdown reopens the lot", async () => {
+    let calls: RoundContext[] = [];
+    let sniped = false;
     engine.setHooks({
-      onBidSlot: async () => ({ ok: false, agentId: "0xabc", rule: "WATCHLIST", amountMinor: 200_000 }),
+      onBidSlot: async (_l, _s, _c, ctx) => {
+        calls.push(ctx);
+        if (ctx.phase === "countdown" && ctx.secondsLeft !== null && ctx.secondsLeft <= 4 && !sniped) {
+          sniped = true;
+          return placed(500_000, "0xsniper");
+        }
+        return null;
+      },
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    expect(engine.snapshot().currentBidMinor).toBe(100_000);
-    expect(events.some((e) => e.type === "reject")).toBe(true);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 100);
+    expect(engine.snapshot().phase).toBe("countdown");
+    await vi.advanceTimersByTimeAsync(3_000);
+    const late = events.find((e) => e.type === "bid") as Extract<AuctionEvent, { type: "bid" }>;
+    expect(late.late).toBe(true);
+    expect(engine.snapshot().leaderId).toBe("0xsniper");
+    // reopened, then quiet again → a fresh countdown → sold
+    expect(calls.some((c) => c.phase === "countdown")).toBe(true);
+    await vi.advanceTimersByTimeAsync(TIMING.countdownMs + TIMING.slotGapMs + 500);
+    expect(events.filter((e) => e.type === "sold").length).toBe(1);
+  });
+
+  it("recordBid is idempotent per tx and ignores stale lots or non-raises", async () => {
+    engine.setHooks({ onBidSlot: () => new Promise(() => {}) });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs);
+    const cid = engine.snapshot().chainLotId;
+    expect(engine.recordBid({ chainLotId: cid, amountMinor: 200_000, bidder: "0xa", txHash: "0xt1" })).toBe(true);
+    expect(engine.recordBid({ chainLotId: cid, amountMinor: 200_000, bidder: "0xa", txHash: "0xt1" })).toBe(false);
+    expect(engine.recordBid({ chainLotId: cid, amountMinor: 150_000, bidder: "0xb", txHash: "0xt2" })).toBe(false);
+    expect(engine.recordBid({ chainLotId: cid + 1, amountMinor: 900_000, bidder: "0xb", txHash: "0xt3" })).toBe(false);
+    expect(engine.recordBid({ chainLotId: cid, amountMinor: 300_000, bidder: "0xb", txHash: "0xt4" })).toBe(true);
+    expect(engine.snapshot()).toMatchObject({ bidCount: 2, currentBidMinor: 300_000, leaderId: "0xb" });
+    expect(events.some((e) => e.type === "outbid")).toBe(true);
+  });
+
+  it("refuses bids while the floor is closed (intro)", () => {
+    engine.start();
+    const cid = engine.snapshot().chainLotId;
+    expect(engine.openLot()?.accepting).toBe(false);
+    expect(engine.recordBid({ chainLotId: cid, amountMinor: 200_000, bidder: "0xa", txHash: "0xi" })).toBe(false);
   });
 
   it("settles and advances on manual Next", async () => {
     const settle = vi.fn(async () => "0xsettle");
-    engine.setHooks({
-      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
-      onSold: settle,
-    });
+    engine.setHooks({ onBidSlot: async () => placed(200_000), onSold: settle });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 50);
     engine.next();
-    // Bounded advance — the engine intentionally loops forever, so never runAllTimers.
     await vi.advanceTimersByTimeAsync(TIMING.soldMs + 500);
     expect(settle).toHaveBeenCalledTimes(1);
     expect(engine.snapshot().lotIndex).toBe(1);
     expect(events.some((e) => e.type === "sold")).toBe(true);
   });
 
-  it("emits unsold (never sold) when a lot has no bids", async () => {
-    // No onBidSlot hook -> every slot is a no-op, so no bids land.
+  it("SOLD reports the escrow's winner, not the local leader (late external bid)", async () => {
+    let once = false;
+    engine.setHooks({
+      onBidSlot: async () => (once ? null : ((once = true), placed(200_000, "0xlocal"))),
+      onSold: async () => ({ txHash: "0xs", winnerId: "0xchain", winnerLabel: "Agent Z", amountMinor: 300_000 }),
+    });
     engine.start();
-    await vi.advanceTimersByTimeAsync(
-      TIMING.introMs + TIMING.biddingMs + TIMING.countdownMs + 100,
-    );
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs + TIMING.countdownMs + 2_000);
+    const sold = events.find((e) => e.type === "sold") as Extract<AuctionEvent, { type: "sold" }>;
+    expect(sold).toMatchObject({ winnerId: "0xchain", winner: "Agent Z", amountMinor: 300_000, txHash: "0xs" });
+  });
+
+  it("emits unsold (never sold) when a lot has no bids", async () => {
+    const unsold = vi.fn();
+    engine.setHooks({ onBidSlot: async () => null, onUnsold: unsold });
+    engine.start();
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.countdownMs + 2_000);
     expect(events.some((e) => e.type === "unsold")).toBe(true);
     expect(events.some((e) => e.type === "sold")).toBe(false);
-    expect(engine.snapshot().currentBidMinor).toBe(100_000); // opening ask, not a bid
+    expect(unsold).toHaveBeenCalledTimes(1);
   });
 
   it("does not double-advance or overlay a stale sale when Next fires during onSold (finding 6)", async () => {
     let release!: (tx?: string) => void;
     const gate = new Promise<string | undefined>((res) => { release = res; });
+    let once = false;
     engine.setHooks({
-      onBidSlot: async () => ({ ok: true, amountMinor: 200_000, bidder: "0xabc", txHash: "0x1" }),
+      onBidSlot: async () => (once ? null : ((once = true), placed(200_000))),
       onSold: () => gate,
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    // Run the countdown: finishLot starts and awaits the gated onSold.
-    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.slotGapMs + 100);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs + TIMING.countdownMs + 2_000);
     expect(engine.snapshot().phase).toBe("sold");
     expect(events.filter((e) => e.type === "sold").length).toBe(0);
 
     engine.next(); // phase already "sold" -> advances immediately to lot 1
     expect(engine.snapshot().lotIndex).toBe(1);
-    release("0xsettle"); // the old lot's settle completes late
+    release("0xsettle");
     await vi.advanceTimersByTimeAsync(TIMING.soldMs + 500);
-
-    // Exactly one advance: still on lot 1 — the stale continuation must not
-    // emit a sold overlay or schedule a second openLot (old code jumped to 2).
     expect(engine.snapshot().lotIndex).toBe(1);
     expect(events.filter((e) => e.type === "sold").length).toBe(0);
   });
 
-  it("does not apply a late bid outcome to the next lot (stale runBidSlot)", async () => {
+  it("does not apply a late bid outcome to the next lot (stale round)", async () => {
     let release!: (v: BidOutcome) => void;
     const gate = new Promise<BidOutcome>((res) => { release = res; });
-    engine.setHooks({
-      onBidSlot: async (_lot, slot) => (slot === 0 ? gate : null),
-    });
+    let first = true;
+    engine.setHooks({ onBidSlot: async () => (first ? ((first = false), gate) : null) });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    // The slot hook is still pending; advance the show past this lot.
-    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs + 500);
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 10);
+    engine.next(); // move on while the round is pending
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 10);
     expect(engine.snapshot().lotIndex).toBe(1);
-    release({ ok: true, amountMinor: 900_000, bidder: "0xlate", txHash: "0x9" });
-    await Promise.resolve();
-    // The stale outcome must NOT overwrite lot 1's bid state.
-    expect(engine.snapshot().currentBidMinor).toBe(100_000); // lot 1's opening ask
-    expect(engine.snapshot().leaderLabel).toBeNull();
+    release(placed(900_000, "0xlate"));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(engine.snapshot().bidCount).toBe(0);
+    expect(engine.snapshot().leaderId).toBeNull();
   });
 
-  it("chains bid slots — never two bids in flight", async () => {
+  it("chains rounds — never two in flight", async () => {
     let active = 0;
     let maxActive = 0;
     engine.setHooks({
@@ -130,68 +191,47 @@ describe("auction engine state machine", () => {
       },
     });
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + 4 * (TIMING.slotGapMs + 100));
+    await vi.advanceTimersByTimeAsync(QUIET_LOT);
     expect(maxActive).toBe(1);
   });
 
-  it("recovers the show when a driver hangs (slot timeout)", async () => {
-    engine.setHooks({
-      onBidSlot: () => new Promise(() => {}), // wedged forever
-    });
+  it("recovers the show when a driver hangs (round timeout)", async () => {
+    engine.setHooks({ onBidSlot: () => new Promise(() => {}) });
     engine.start();
-    await vi.advanceTimersByTimeAsync(
-      TIMING.introMs + TIMING.slotGapMs + TIMING.slotTimeoutMs + TIMING.slotGapMs + TIMING.countdownMs + TIMING.soldMs + 200,
-    );
-    // The wedged lot must end and the next lot must open anyway.
+    await vi.advanceTimersByTimeAsync(TIMING.introMs + 2 * TIMING.slotTimeoutMs + TIMING.countdownMs + TIMING.soldMs + 500);
     expect(engine.snapshot().lotIndex).toBe(1);
   });
 
   it("runs the catalog exactly once, then ends (scheduler model)", async () => {
+    engine.setHooks({ onBidSlot: async () => null });
     const ends: number[] = [];
     engine.subscribe((e) => { if (e.type === "auction_end") ends.push(e.lots); });
     engine.start();
-    // One pass over all six lots: intro + slots + countdown + sold each.
-    await vi.advanceTimersByTimeAsync(6 * (TIMING.introMs + TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs + 2_000));
-    expect(ends).toEqual([engine.snapshot().totalLots]);
+    await vi.advanceTimersByTimeAsync(3 * QUIET_LOT);
+    expect(ends).toEqual([3]);
     expect(engine.snapshot().phase).toBe("ended");
-    // The engine can be started again for a fresh session.
+    engine.setLots(mkLots(2).map((l) => ({ ...l, chainId: l.chainId + 50 })));
     engine.start();
     expect(engine.snapshot().phase).toBe("intro");
   });
 
-  it("manual Next on the last lot ends the auction", async () => {
-    engine.start();
-    engine.next(); // no bids → straight through every lot
-    for (let i = 0; i < 6 && engine.snapshot().phase !== "ended"; i++) {
-      await vi.advanceTimersByTimeAsync(TIMING.soldMs + TIMING.introMs + TIMING.slotGapMs + 100);
-      engine.next();
-    }
-    expect(engine.snapshot().phase).toBe("ended");
-    engine.start(); // restartable
-    expect(engine.snapshot().phase).toBe("intro");
+  it("a viewer's Next never starts an auction — only the scheduler does", () => {
+    engine.next();
+    expect(engine.snapshot().started).toBe(false);
+    expect(engine.snapshot().phase).toBe("idle");
   });
 
-  it("gives each loop of a lot a fresh on-chain id", async () => {
-    const ids: number[] = [];
-    engine.setHooks({
-      onBidSlot: async (_lot, _slot, chainLotId) => { ids.push(chainLotId); return null; },
-    });
+  it("uses each lot's scheduler-assigned on-chain id", () => {
     engine.start();
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    // Run out the lot, advance into the next cycle's first bid slot.
-    await vi.advanceTimersByTimeAsync(TIMING.biddingMs + TIMING.countdownMs + TIMING.soldMs);
-    await vi.advanceTimersByTimeAsync(TIMING.introMs + TIMING.slotGapMs);
-    expect(ids.length).toBeGreaterThan(1);
-    // Slots within one visit share an id; a new loop must get a different one.
-    expect(new Set(ids).size).toBeGreaterThan(1);
-    expect(ids.at(-1)).not.toBe(ids[0]);
+    expect(engine.snapshot().chainLotId).toBe(1_000_000);
   });
 
-  it("emits captions with audio URLs from the voice hook", async () => {
-    engine.setHooks({ speak: async () => ({ text: "Lot 1. Bidding is open.", audioUrl: "/api/audio/abc" }) });
+  it("speaks the lot intro with the lot itself as context", async () => {
+    const speak = vi.fn(async () => ({ text: "Lot 1. Item 0.", audioUrl: "/api/audio/abc" }));
+    engine.setHooks({ speak });
     engine.start();
     await vi.advanceTimersByTimeAsync(0);
-    const cap = events.find((e) => e.type === "caption");
-    expect(cap).toMatchObject({ text: "Lot 1. Bidding is open.", audioUrl: "/api/audio/abc" });
+    expect(speak).toHaveBeenCalledWith("lotIntro", { n: 1, amountMinor: 100_000 }, 0, expect.objectContaining({ lot: expect.objectContaining({ title: "Item 0" }) }));
+    expect(events.find((e) => e.type === "caption")).toMatchObject({ text: "Lot 1. Item 0.", audioUrl: "/api/audio/abc" });
   });
 });

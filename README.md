@@ -1,9 +1,11 @@
 # commenda
 
-A fully agentic live-stream flash auction. An AI voice auctioneer hosts a loop of
-consumer-good lots while delegated bidding agents — each with a wallet, budget,
-watchlist and guardrails — bid autonomously and pay a flat per-bid fee via x402.
-Outbid funds return immediately. The safety + escrow story *is* the product.
+A live-stream flash auction run entirely by agents. An ElevenLabs auctioneer calls
+the floor; eight bidding agents — each with its own wallet, owner-set budget and
+guardrails, private valuations and a bidding persona — decide for themselves when to
+raise, when to wait and when to walk away, and pay for every bid over x402 on Arc.
+No model ever touches money: agents propose, deterministic code decides, and the
+escrow is the truth.
 
 ## Run it
 
@@ -15,21 +17,43 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 and click **Next lot** if you want to skip ahead; sound is
-on by default (mute via the dock). Sign in at `/dashboard` with an injected wallet —
-see `notes/WALLET_LOGIN.md` (gitignored).
+Open http://localhost:3000/live. Auctions run on a schedule (`AUCTION_START_DELAY_MS`,
+`AUCTION_GAP_MINUTES`, `AUCTION_ITEMS`); between auctions the dock's ⏭ starts the next
+one immediately (signed-in). Sound is on by default. Sign in at `/` with an injected
+wallet. For a recording: `AUCTION_START_DELAY_MS=8000 AUCTION_GAP_MINUTES=0.5 AUCTION_ITEMS=2 npm run dev`.
+
+**Red-team demo** — while a lot is open, run a compromised agent against the floor:
+
+```sh
+node --env-file=.env.local scripts/rogue-agent.mjs
+```
+
+It holds a real funded wallet and valid x402 signatures, and tries to lie about the
+lot's category, redirect the proceeds, bid on a closed lot, blow its owner's cap and
+bid outside its mandate. Every attempt is blocked, logged, flashed on the stage — and
+never charged the fee.
 
 ## What's in the demo
 
-- **Looping stream** of six generated lots. Categories exercise the mandates:
-  electronics, art, and collectibles (bidding wars).
-- **ElevenLabs narration** (`eleven_flash_v2_5`), event-triggered from typed
-  templates. No free-form text reaches TTS. Cached MP3s make replays free; a hard
-  budget, kill switch and ledger cap live generation. Extra voice work is paused.
-- **Eight delegated agents**, all live bidders with wallets and visible guidelines.
-  They ring the item in the arena; each bid fires a beam into the centre.
+- **Scheduled auctions** of generated lots, published before they run. Each lot is
+  a genuine English auction with a soft close: a bid during "going once… going
+  twice…" reopens the lot.
+- **Autonomous, deterministic agents** (`lib/agents/strategy.ts`). Each agent
+  derives a private valuation per item (owner's per-bid cap × category affinity ×
+  condition) and bids through a persona — *steady*, *jumper* (jump bids to scare off
+  the field), *sniper* (silent until the final seconds), *bargain*, *collector*. No
+  LLM, no randomness: every decision is reproducible and explainable. The floor
+  recognises one hand per round, like a real auctioneer.
+- **ElevenLabs auctioneer** (`eleven_flash_v2_5`): introduces each lot, calls
+  every bid by name ("1 dollar 25, from Agent B! Do I hear 1 dollar 50?"), calls
+  the late strike and the hammer — with on-screen captions. Only server-owned text
+  reaches TTS (whitelisted templates, strict allowlists on catalog prose and
+  names); cached MP3s make replays free; a budget, kill switch and ledger cap spend.
 - **x402 in one place**: `POST /api/bids` verifies a signed payment before the
   handler runs and settles only on a 2xx. Every agent bid genuinely pays a flat fee.
+  The agent states only *which lot* and *how much*; the server binds the bid to the
+  lot actually on the block and supplies its category and seller itself, so the
+  guardrails check facts, not the agent's claims (`LOT_MISMATCH`, `LOT_CLOSED`).
 - **Deterministic guardrails**: `lib/auction/decide.ts` is pure, dependency-free,
   table-tested, and the sole authority on whether a proposed bid becomes an
   on-chain action. "AI recommends, code enforces the max."
@@ -44,16 +68,33 @@ see `notes/WALLET_LOGIN.md` (gitignored).
 
 ## Decision loop
 
-1. **Watch** — the agent sees the live lot and checks its watchlist.
-2. **Decide** — fixed rules check idempotency, per-bid cap, cumulative budget,
-   velocity, circuit breaker, watchlist, seller allowlist and approval threshold.
-3. **Pay** — a signed x402 payment (with a stable identifier) unlocks the bid.
-   Escrow locks it; outbid funds are credited back immediately.
-4. **Settle** — SOLD pays the seller from the winning bid and mints a receipt.
+1. **Watch** — the agent reads the floor (`GET /api/auction`): lot, facts, highest
+   bid, minimum valid raise, clock.
+2. **Choose** — its strategy compares the price to its private valuation: raise,
+   wait (snipers), or drop out.
+3. **Authorize** — `decide()` checks the floor binding, kill switch, idempotency,
+   self-outbid, per-bid cap, budget, velocity, circuit breaker, watchlist, seller
+   allowlist and approval threshold. Rejections cost nothing.
+4. **Pay** — a signed x402 payment (with a stable identifier) unlocks the bid.
+   Escrow locks it; the outbid bidder is refunded in the same transaction.
+5. **Settle** — the hammer settles from escrow state (the chain names the winner),
+   issues a claim and mints a soulbound receipt. A crash mid-lot is recovered on
+   the next boot from the `open_lots` ledger.
+
+## Agent API (bring your own agent)
+
+- `GET /api/auction` — public floor snapshot: `lot`, `acceptingBids`,
+  `highestBidMinor`, `minNextBidMinor`, `endsInMs`, `nextAuctionInMs`.
+- `POST /api/bids` — x402 ($0.001 USDC on Arc, `payment-identifier` required) with
+  `{ id, lotId, amountMinor }`. Responses: `placed` (receipt-confirmed),
+  `rejected` + rule, `busy` + `retryAfterMs`. Only `placed` is charged.
 
 ## Layout
 
+- `lib/agents/strategy.ts` — personas, private valuations, market rules (pure).
 - `lib/auction/decide.ts` — pure guardrails and audit receipts.
+- `lib/auction/{settlement,scheduler}.ts` — chain-truth settlement and recovery; sessions.
+- `scripts/rogue-agent.mjs` — red-team agent for the guardrail demo.
 - `lib/auction/{state,seed,reconcile,submit-bid,inflight,resolver-runner}.ts` —
   single-process mandate store, event-sourced budgets, in-flight resolution.
 - `lib/auction/{chain,circle-facilitator,handler,bidder,engine,worker-pool,runtime}.ts`
@@ -94,4 +135,5 @@ shadcn CLI with Magic UI + React Bits, lucide-react, `node:sqlite`, Foundry.
 ## Verification
 
 `npm run typecheck && npm test && npm run build` must pass; `forge test` for contracts.
-As of 2026-11-18: typecheck, 102 vitest tests, 26 Foundry tests, and build all pass.
+As of 2026-11-18: typecheck, 170 vitest tests (incl. a market simulation over the real
+roster), 26 Foundry tests, and build all pass.

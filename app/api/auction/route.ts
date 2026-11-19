@@ -1,46 +1,49 @@
 /**
- * GET /api/auction — the agent-facing public snapshot.
+ * GET /api/auction — the agent-facing public snapshot. Everything an
+ * external agent needs to make a decision: the open lot and its facts, the
+ * receipt-confirmed highest bid, the minimum valid raise, and the clock.
+ * Public on-chain or engine state only — no mandate data.
  *
- * Agents today can only blind-bid POST /api/bids; they had no way to learn
- * the current lot, the on-chain highest bid, or how long the lot has left.
- * Everything here is public on-chain or engine state — no mandate data.
+ * To bid: POST /api/bids (x402, $0.001) with { id, lotId, amountMinor }.
+ * The server binds the bid to the open lot; category/seller are floor facts.
  */
 import { ensureBootstrapped } from "@/lib/auction/bootstrap";
 import { getEngine } from "@/lib/auction/engine";
+import { minNextBid } from "@/lib/agents/strategy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INCREMENT_MINOR = 100_000; // matches the demo's bid step
-
 export async function GET(): Promise<Response> {
   ensureBootstrapped();
   const snap = getEngine().snapshot();
-
-  // Highest bid above the opening ask; local state is receipt-confirmed
-  // (a bid reaches the engine only after its placeBid receipt succeeded).
-  const highest = Math.max(0, snap.currentBidMinor - (snap.lot?.openingMinor ?? 0));
+  const open = getEngine().openLot();
+  const highest = snap.bidCount > 0 ? snap.currentBidMinor : null;
 
   return Response.json({
+    session: snap.sessionName,
     lot:
-      snap.lot && snap.phase !== "idle"
+      open
         ? {
-            chainLotId: snap.chainLotId,
-            displayId: snap.lot.id,
-            title: snap.lot.title,
-            category: snap.lot.category,
-            seller: snap.lot.seller,
-            openingMinor: snap.lot.openingMinor,
-            sku: snap.lot.sku,
+            chainLotId: open.chainLotId,
+            displayId: open.lot.id,
+            title: open.lot.title,
+            category: open.lot.category,
+            seller: open.lot.seller,
+            openingMinor: open.lot.openingMinor,
+            sku: open.lot.sku,
           }
         : null,
     phase: snap.phase,
+    acceptingBids: open?.accepting ?? false,
     lotIndex: snap.lotIndex,
     totalLots: snap.totalLots,
+    bidCount: snap.bidCount,
     highestBidMinor: highest,
-    highestBidder: snap.leaderLabel, // display label; the address is public on-chain
-    minNextBidMinor:
-      highest > 0 ? snap.currentBidMinor + INCREMENT_MINOR : (snap.lot?.openingMinor ?? 0) + INCREMENT_MINOR,
-    endsInMs: Math.max(0, snap.phaseEndsAt - Date.now()),
+    highestBidder: snap.leaderLabel,
+    minNextBidMinor: open ? minNextBid(highest, open.lot.openingMinor) : null,
+    endsInMs: snap.phaseEndsAt ? Math.max(0, snap.phaseEndsAt - Date.now()) : null,
+    softClose: "a bid during the countdown reopens the lot",
+    nextAuctionInMs: snap.nextAuctionAt ? Math.max(0, snap.nextAuctionAt - Date.now()) : null,
   });
 }

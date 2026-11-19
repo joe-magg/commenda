@@ -21,7 +21,9 @@ import { createChainAdapter } from "@/lib/auction/chain";
 import { handleBid, type HandlerDeps } from "@/lib/auction/handler";
 import { getRuntime } from "@/lib/auction/runtime";
 import { record } from "@/lib/auction/trace";
-import { listAgents, recordAuditEvent } from "@/lib/db/repo";
+import { getAgent, recordAuditEvent } from "@/lib/db/repo";
+import { getEngine } from "@/lib/auction/engine";
+import { ensureBootstrapped } from "@/lib/auction/bootstrap";
 
 const NETWORK = "eip155:5042002" as const;
 const ROUTE_KEY = "/api/bids";
@@ -59,12 +61,25 @@ function chain(): ReturnType<typeof createChainAdapter> {
       escrowAddress: env("ESCROW_ADDRESS"),
       agentKeys: runtime.keys,
       // One-time allowance = the agent's configured budget, not a per-bid tx.
-      allowances: Object.fromEntries(
-        listAgents().map((a) => [a.id, a.policy.budgetMinor]),
-      ),
+      allowances: (id) => getAgent(id)?.policy.budgetMinor ?? 0,
     });
   }
   return chainG.__commendaChain;
+}
+
+const labelFor = (agentId: string) => getAgent(agentId)?.label ?? `${agentId.slice(0, 6)}…${agentId.slice(-4)}`;
+
+/** Every blocked bid is visible on the stage — enforcement is part of the show. */
+function showBlock(agentId: string, rule: string, amountMinor: unknown): void {
+  const open = getEngine().openLot();
+  getEngine().emitExternal({
+    type: "reject",
+    lotId: open?.lot.id ?? -1,
+    agentId,
+    rule,
+    amountMinor: typeof amountMinor === "number" ? amountMinor : 0,
+    label: labelFor(agentId),
+  });
 }
 
 const deps: HandlerDeps = {
@@ -72,6 +87,27 @@ const deps: HandlerDeps = {
   resolveAgentId: (payer) => payerToAgent.get(payer.toLowerCase()) ?? null,
   now: () => Date.now(),
   getChain: chain,
+  // The floor's truth: which lot is open and what it is. Agents can't assert it.
+  openLot: () => {
+    const o = getEngine().openLot();
+    return o ? { chainLotId: o.chainLotId, category: o.lot.category, seller: o.lot.seller, accepting: o.accepting } : null;
+  },
+  onFloorReject: (rule, payer, body) => {
+    const agentId = payerToAgent.get(payer.toLowerCase()) ?? payer.toLowerCase();
+    const b = (body ?? {}) as Record<string, unknown>;
+    const open = getEngine().openLot();
+    recordAuditEvent(
+      Date.now(),
+      agentId,
+      `bid_${rule.toLowerCase()}`,
+      JSON.stringify({
+        detail: `claimed lot=${String(b.lotId).slice(0, 40)} category=${String(b.category).slice(0, 40)}; floor lot=${open?.chainLotId ?? "closed"} category=${open?.lot.category ?? "-"}`,
+        lotId: String(b.lotId).slice(0, 40),
+        amountMinor: typeof b.amountMinor === "number" ? b.amountMinor : 0,
+      }),
+    );
+    showBlock(agentId, rule, b.amountMinor);
+  },
   // Every decide() outcome lands in audit_events (agent-side, audit-only detail).
   onDecision: (audit) => {
     recordAuditEvent(
@@ -80,6 +116,7 @@ const deps: HandlerDeps = {
       `bid_${audit.rule.toLowerCase()}`,
       JSON.stringify({ detail: audit.detail, lotId: audit.bid.lotId, amountMinor: audit.bid.amountMinor }),
     );
+    if (audit.decision.decision !== "BID") showBlock(audit.agentId, audit.rule, audit.bid.amountMinor);
   },
 };
 
@@ -97,6 +134,7 @@ function payerFromRequest(req: NextRequest): string | null {
 }
 
 async function handler(req: NextRequest): Promise<NextResponse> {
+  ensureBootstrapped();
   const payer = payerFromRequest(req);
   if (!payer) return NextResponse.json({ status: "rejected", rule: "NO_PAYER" }, { status: 400 });
   let body: unknown;
@@ -107,6 +145,21 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   }
   const start = Date.now();
   const { code, body: dto } = await handleBid(body, payer, deps);
+  // A receipt-confirmed bid from ANY client goes onto the floor here — the
+  // pool's agents and an external agent take exactly the same path.
+  if (dto.status === "placed" && dto.txHash) {
+    const b = body as { lotId?: unknown; amountMinor?: unknown };
+    const agentId = deps.resolveAgentId(payer);
+    if (agentId && typeof b.amountMinor === "number") {
+      getEngine().recordBid({
+        chainLotId: Number(b.lotId),
+        amountMinor: b.amountMinor,
+        bidder: agentId,
+        txHash: dto.txHash,
+        label: labelFor(agentId),
+      });
+    }
+  }
   console.info("[commenda:bids] handled", JSON.stringify({ status: dto.status, ms: Date.now() - start }));
   // Server-side trace: handler latency and outcome per request. The pool's
   // trace records the same bid from the driver side with client latency.

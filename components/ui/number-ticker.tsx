@@ -68,7 +68,12 @@ export function NumberTicker({
       )}
       {...props}
     >
-      {startValue}
+      {/* Formatted from the first paint: a value that never animates (start ===
+          end) must still show its fixed decimals, e.g. "0.10" not "0.1". */}
+      {Intl.NumberFormat("en-US", {
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces,
+      }).format(startValue)}
     </span>
   )
 }

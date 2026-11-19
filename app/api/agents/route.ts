@@ -1,6 +1,8 @@
 /** Agent registry API — signed-in users own agents with typed policies. */
 import { currentUser } from "@/lib/auth";
-import { createAgent, listAgents, type Policy } from "@/lib/db/repo";
+import { createAgent, listAgents, newAgentId, type Policy } from "@/lib/db/repo";
+import { PERSONAS } from "@/lib/agents/strategy";
+import { deriveAgentAddress, walletsEnabled } from "@/lib/agents/wallets";
 import { DEMO_SELLER } from "@/lib/auction/lots";
 import { syncAgentPolicy } from "@/lib/auction/runtime";
 
@@ -28,8 +30,16 @@ export async function POST(req: Request): Promise<Response> {
 
   // ownerId comes from the session, never from the request body.
   const { label, budgetMinor, perBidCapMinor, watchlist, approvalEnabled, approvalAboveMinor, maxWins } = body;
-  if (typeof label !== "string" || label.trim().length < 1 || label.length > 40) {
-    return Response.json({ error: "label must be 1-40 chars" }, { status: 400 });
+  const strategy = body.strategy ?? "steady";
+  if (typeof strategy !== "string" || !(PERSONAS as readonly string[]).includes(strategy)) {
+    return Response.json({ error: "unknown strategy" }, { status: 400 });
+  }
+  if (!walletsEnabled()) {
+    return Response.json({ error: "agent wallets are not configured on this server" }, { status: 503 });
+  }
+  // Names are spoken by the auctioneer — keep them to a safe, short alphabet.
+  if (typeof label !== "string" || !/^[A-Za-z][A-Za-z0-9 '-]{0,23}$/.test(label.trim())) {
+    return Response.json({ error: "name: 1-24 letters, numbers, spaces, ' or -" }, { status: 400 });
   }
   if (!isPosInt(budgetMinor) || !isPosInt(perBidCapMinor)) {
     return Response.json({ error: "amounts must be positive integers (minor units)" }, { status: 400 });
@@ -57,16 +67,21 @@ export async function POST(req: Request): Promise<Response> {
     approvalEnabled,
     approvalAboveMinor: approvalAboveMinor as number,
     maxWins: maxWins as number,
+    strategy,
   };
 
-  const { agent, apiKey } = createAgent({
+  // The agent's own wallet, derived from the server master seed + its id —
+  // nothing secret is stored. It sits on standby until its owner funds it.
+  const id = newAgentId();
+  const { agent } = createAgent({
+    id,
     ownerId: user.id,
     label: label.trim(),
-    walletAddress: null, // no wallet key -> standby until funded in a later phase
+    walletAddress: deriveAgentAddress(id),
     policy,
   });
   // Register the policy with the guardrail runtime so decide() sees it
   // immediately — awaited so the 201 never precedes the mandate's existence.
   await syncAgentPolicy(agent);
-  return Response.json({ agent, apiKey }, { status: 201 });
+  return Response.json({ agent }, { status: 201 });
 }

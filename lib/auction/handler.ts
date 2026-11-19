@@ -38,6 +38,33 @@ export function toHttp(result: SubmitResult): { code: number; body: BidResponse 
   }
 }
 
+/** The lot the auction floor is currently taking bids on (engine truth). */
+export type OpenLot = { chainLotId: number; category: string; seller: string; accepting: boolean };
+
+export type FloorRule = "LOT_CLOSED" | "LOT_MISMATCH";
+
+/**
+ * Bind an agent's bid to the lot that is ACTUALLY open. The agent states
+ * only which lot and how much; the lot's category and seller are server
+ * facts, so the watchlist and seller guardrails in decide() check truth,
+ * not the agent's own claims. Any stated fact that disagrees with the floor
+ * is rejected outright (an honest client never mismatches).
+ */
+export function bindToOpenLot(
+  body: unknown,
+  lot: OpenLot | null,
+): { ok: true; bid: unknown } | { ok: false; rule: FloorRule | "INVALID_BID" } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false, rule: "INVALID_BID" };
+  const b = body as Record<string, unknown>;
+  if (!lot || !lot.accepting) return { ok: false, rule: "LOT_CLOSED" };
+  if (String(b.lotId) !== String(lot.chainLotId)) return { ok: false, rule: "LOT_CLOSED" };
+  if (b.category !== undefined && b.category !== lot.category) return { ok: false, rule: "LOT_MISMATCH" };
+  if (b.seller !== undefined && (typeof b.seller !== "string" || b.seller.toLowerCase() !== lot.seller.toLowerCase())) {
+    return { ok: false, rule: "LOT_MISMATCH" };
+  }
+  return { ok: true, bid: { ...b, lotId: String(lot.chainLotId), category: lot.category, seller: lot.seller } };
+}
+
 export type HandlerDeps = {
   state: AuctionState;
   /** Resolve agent from the x402-authenticated payer address (server-side). */
@@ -46,6 +73,10 @@ export type HandlerDeps = {
   getChain: () => SubmitBidDeps["chain"];
   /** Optional audit sink for every decide() outcome (see SubmitBidDeps.onDecision). */
   onDecision?: SubmitBidDeps["onDecision"];
+  /** The open lot (engine). Omitted only in unit tests of the decide path. */
+  openLot?: () => OpenLot | null;
+  /** Observe floor-level rejections (before decide) for the audit log. */
+  onFloorReject?: (rule: FloorRule, payer: string, body: unknown) => void;
 };
 
 /** Parse + validate the request body into a Bid, or null. */
@@ -60,7 +91,18 @@ export async function handleBid(
   payer: string,
   deps: HandlerDeps,
 ): Promise<{ code: number; body: BidResponse }> {
-  const bid = parseBid(body);
+  let candidate: unknown = body;
+  if (deps.openLot) {
+    const bound = bindToOpenLot(body, deps.openLot());
+    if (!bound.ok) {
+      if (bound.rule !== "INVALID_BID") {
+        try { deps.onFloorReject?.(bound.rule, payer, body); } catch { /* audit never breaks bidding */ }
+      }
+      return { code: 400, body: { status: "rejected", rule: bound.rule } };
+    }
+    candidate = bound.bid;
+  }
+  const bid = parseBid(candidate);
   if (!bid) return { code: 400, body: { status: "rejected", rule: "INVALID_BID" } };
 
   const result = await submitBid(deps.state, bid, {

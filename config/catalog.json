@@ -1,0 +1,19 @@
+{
+  "_comment": "Demo catalog — item names only. Each auction deals one name per category slot, no repeats within an auction. Names are spoken by the auctioneer: letters, numbers, spaces, commas, apostrophes and hyphens; max 60 characters.",
+  "electronics": [
+    "AI Smart Glasses",
+    "Wintendo N67",
+    "Wintendo GameSphere"
+  ],
+  "art": [
+    "1909 Original Oil Painting - Bluebird",
+    "2024 Very Expensive Abstract Art",
+    "1535 Original Glass Mosaic"
+  ],
+  "collectibles": [
+    "UBC Attendee Badge",
+    "Arch Manning Signed Jersey",
+    "Limited Edition UBC Merch"
+  ]
+
+}

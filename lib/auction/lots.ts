@@ -11,7 +11,9 @@
  * agents' sellerAllowlist or decide() rejects every bid (SELLER rule).
  */
 
-export const DEMO_SELLER = "0x3333333333333333333333333333333333333333" as const;
+/** The auction house treasury (the auctioneer/fee wallet): sale proceeds
+ *  recirculate instead of burning testnet USDC at an unowned address. */
+export const DEMO_SELLER = "0x35cfc9c9fa91caa7e1f66e119d5196cde943e9be" as const;
 
 /** Fresh on-chain lot range per process so a restart never reuses settled lots. */
 const CHAIN_LOT_BASE = Math.floor(Math.random() * 900_000) + 100_000;
@@ -50,7 +52,7 @@ export const LOTS: readonly Lot[] = CATALOG.map((c, id) => ({
 
 /** Short, human-friendly label for a bidder address in the UI. */
 export function bidderLabel(address: string): string {
-  if (address.toLowerCase() === DEMO_SELLER) return "Seller";
+  if (address.toLowerCase() === DEMO_SELLER) return "House";
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 

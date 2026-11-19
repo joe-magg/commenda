@@ -4,9 +4,11 @@
  */
 import type { Mandate } from "./decide";
 import type { AuctionState } from "./state";
+import { PERSONAS } from "@/lib/agents/strategy";
 
 const ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 const PRIVATE_KEY = /^0x[a-fA-F0-9]{64}$/;
+const PERSONA_SET = new Set<string>(PERSONAS);
 const MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type AgentConfig = {
@@ -18,6 +20,8 @@ export type AgentConfig = {
   sellerAllowlist: string[];
   approvalEnabled: boolean;
   approvalAboveMinor: number;
+  /** Bidding persona (lib/agents/strategy.ts). Not a guardrail — decide() ignores it. */
+  strategy?: string;
 };
 
 const isPosInt = (x: unknown): x is number =>
@@ -35,7 +39,7 @@ export function parseAgentConfig(raw: unknown): AgentConfig[] {
   return raw.map((item, i) => {
     if (typeof item !== "object" || item === null) throw new Error(`agent[${i}] not an object`);
     const o = item as Record<string, unknown>;
-    const allowed = ["id", "payer", "budgetMinor", "perBidCapMinor", "watchlist", "sellerAllowlist", "approvalEnabled", "approvalAboveMinor"];
+    const allowed = ["id", "payer", "budgetMinor", "perBidCapMinor", "watchlist", "sellerAllowlist", "approvalEnabled", "approvalAboveMinor", "strategy"];
     for (const k of Object.keys(o)) if (!allowed.includes(k)) throw new Error(`agent[${i}] unknown field ${k}`);
 
     if (!isAddress(o.id)) throw new Error(`agent[${i}] bad id address`);
@@ -56,6 +60,8 @@ export function parseAgentConfig(raw: unknown): AgentConfig[] {
     if (typeof o.approvalEnabled !== "boolean") throw new Error(`agent[${i}] approvalEnabled must be boolean`);
     if (!Number.isSafeInteger(o.approvalAboveMinor) || (o.approvalAboveMinor as number) < 0)
       throw new Error(`agent[${i}] bad approvalAboveMinor`);
+    if (o.strategy !== undefined && !(typeof o.strategy === "string" && PERSONA_SET.has(o.strategy)))
+      throw new Error(`agent[${i}] unknown strategy`);
     const approvalAboveMinor = o.approvalAboveMinor as number;
     if (o.approvalEnabled && !(approvalAboveMinor > 0 && approvalAboveMinor < (o.perBidCapMinor as number)))
       throw new Error(`agent[${i}] approvalAboveMinor must be in (0, perBidCapMinor)`);
@@ -69,6 +75,7 @@ export function parseAgentConfig(raw: unknown): AgentConfig[] {
       sellerAllowlist: (o.sellerAllowlist as string[]).map((v) => v.toLowerCase()),
       approvalEnabled: o.approvalEnabled,
       approvalAboveMinor,
+      ...(typeof o.strategy === "string" ? { strategy: o.strategy } : {}),
     };
   });
 }

@@ -11,6 +11,8 @@ export type Policy = {
   approvalEnabled: boolean;
   approvalAboveMinor: number;
   maxWins: number; // stop deploying after this many items won
+  /** Bidding style (lib/agents/strategy.ts). Not a guardrail — decide() ignores it. */
+  strategy: string;
 };
 export type Agent = {
   id: string;
@@ -29,7 +31,7 @@ export type Session = {
   status: "scheduled" | "live" | "ended";
   catalog: {
     id: number; title: string; sku: string; category: string;
-    condition: string; provenance: string; artSeed: string; openingMinor: number;
+    artSeed: string; openingMinor: number;
   }[];
   createdAt: number;
 };
@@ -50,11 +52,12 @@ type AgentRow = {
   enabled: number; status: Agent["status"]; created_at: number;
   budget_minor: number; per_bid_cap_minor: number; watchlist: string;
   seller_allowlist: string; approval_enabled: number; approval_above_minor: number; max_wins: number;
+  strategy: string | null;
 };
 
 const AGENT_JOIN = `
   SELECT a.*, p.budget_minor, p.per_bid_cap_minor, p.watchlist, p.seller_allowlist,
-         p.approval_enabled, p.approval_above_minor, p.max_wins
+         p.approval_enabled, p.approval_above_minor, p.max_wins, p.strategy
   FROM agents a JOIN agent_policies p ON p.agent_id = a.id
 `;
 
@@ -75,6 +78,7 @@ function toAgent(r: AgentRow): Agent {
       approvalEnabled: r.approval_enabled === 1,
       approvalAboveMinor: r.approval_above_minor,
       maxWins: r.max_wins,
+      strategy: r.strategy ?? "steady",
     },
   };
 }
@@ -118,7 +122,7 @@ export function getAgent(id: string): Agent | undefined {
 }
 
 export function listSessions(): Session[] {
-  const rows = getDb().prepare("SELECT * FROM sessions ORDER BY starts_at").all() as
+  const rows = getDb().prepare("SELECT * FROM sessions ORDER BY created_at").all() as
     { id: string; name: string; starts_at: number; status: Session["status"]; catalog: string; created_at: number }[];
   return rows.map((r) => ({
     id: r.id,
@@ -183,6 +187,8 @@ export function redeemClaim(id: string): Claim | undefined {
 }
 
 export type CreateAgentInput = {
+  /** Pre-generated id (user agents derive their wallet from it). */
+  id?: string;
   ownerId: string;
   label: string;
   walletAddress: string | null;
@@ -192,7 +198,7 @@ export type CreateAgentInput = {
 /** Create an agent and issue a scoped API key. Returns the key ONCE (plaintext). */
 export function createAgent(input: CreateAgentInput): { agent: Agent; apiKey: string } {
   const db = getDb();
-  const id = `agt_${randomBytes(8).toString("hex")}`;
+  const id = input.id ?? `agt_${randomBytes(8).toString("hex")}`;
   const apiKey = `commenda_agt_${randomBytes(18).toString("base64url")}`;
   const keyHash = createHash("sha256").update(apiKey).digest("hex");
   const now = Date.now();
@@ -203,7 +209,7 @@ export function createAgent(input: CreateAgentInput): { agent: Agent; apiKey: st
       "INSERT INTO agents (id, owner_id, label, wallet_address, api_key_hash, enabled, status, created_at) VALUES (?, ?, ?, ?, ?, 0, 'standby', ?)",
     ).run(id, input.ownerId, input.label, input.walletAddress, keyHash, now);
     db.prepare(
-      "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO agent_policies (agent_id, budget_minor, per_bid_cap_minor, watchlist, seller_allowlist, approval_enabled, approval_above_minor, max_wins, strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(
       id,
       input.policy.budgetMinor,
@@ -213,6 +219,7 @@ export function createAgent(input: CreateAgentInput): { agent: Agent; apiKey: st
       input.policy.approvalEnabled ? 1 : 0,
       input.policy.approvalAboveMinor,
       input.policy.maxWins,
+      input.policy.strategy,
     );
     db.prepare("INSERT INTO audit_events (at, agent_id, kind, detail) VALUES (?, ?, ?, ?)").run(
       now,
@@ -249,7 +256,7 @@ export function updatePolicy(id: string, patch: Partial<Policy>): Agent | undefi
   if (!current) return undefined;
   const merged = { ...current.policy, ...patch };
   getDb().prepare(
-    "UPDATE agent_policies SET budget_minor=?, per_bid_cap_minor=?, watchlist=?, seller_allowlist=?, approval_enabled=?, approval_above_minor=?, max_wins=? WHERE agent_id=?",
+    "UPDATE agent_policies SET budget_minor=?, per_bid_cap_minor=?, watchlist=?, seller_allowlist=?, approval_enabled=?, approval_above_minor=?, max_wins=?, strategy=? WHERE agent_id=?",
   ).run(
     merged.budgetMinor,
     merged.perBidCapMinor,
@@ -258,6 +265,7 @@ export function updatePolicy(id: string, patch: Partial<Policy>): Agent | undefi
     merged.approvalEnabled ? 1 : 0,
     merged.approvalAboveMinor,
     merged.maxWins,
+    merged.strategy,
     id,
   );
   return getAgent(id);
@@ -277,14 +285,14 @@ export function recordAuditEvent(at: number, agentId: string, kind: string, deta
 }
 
 /** Persist a new auction session with its generated catalog. */
-export function createSession(name: string, catalog: Session["catalog"]): Session {
+export function createSession(name: string, catalog: Session["catalog"], status: Session["status"] = "live"): Session {
   const db = getDb();
   const id = `flash-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
   const now = Date.now();
   db.prepare(
-    "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, 'live', ?, ?)",
-  ).run(id, name, now, JSON.stringify(catalog), now);
-  return { id, name, startsAt: now, status: "live", catalog, createdAt: now };
+    "INSERT INTO sessions (id, name, starts_at, status, catalog, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, name, now, status, JSON.stringify(catalog), now);
+  return { id, name, startsAt: now, status, catalog, createdAt: now };
 }
 
 export function setSessionStatus(id: string, status: "scheduled" | "live" | "ended"): void {
@@ -299,4 +307,74 @@ export function listAuditEvents(limit = 100, kindPrefix?: string): { at: number;
     : (getDb().prepare("SELECT * FROM audit_events ORDER BY id DESC LIMIT ?").all(limit) as
         { at: number; agent_id: string | null; kind: string; detail: string }[]);
   return rows.map((r) => ({ at: r.at, agentId: r.agent_id, kind: r.kind, detail: r.detail }));
+}
+
+/**
+ * Every lot the engine opens is recorded BEFORE any bid can target it, and
+ * closed only after settlement (or once it is known to have no bids). Boot
+ * recovery settles whatever is still open — including lots a crash
+ * interrupted mid-bidding, which never reached SOLD and so have no claim.
+ */
+export function recordLotOpened(input: { chainLotId: number; title: string; sku: string; artSeed?: string; category?: string }): void {
+  getDb()
+    .prepare("INSERT OR IGNORE INTO open_lots (chain_lot_id, title, sku, art_seed, opened_at, category) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(String(input.chainLotId), input.title, input.sku, input.artSeed ?? null, Date.now(), input.category ?? null);
+}
+
+/** Close a lot, recording the escrow's verdict (winner + price) when it sold. */
+export function markLotClosed(chainLotId: number, sold?: { winnerId: string | null; amountMinor: number }): void {
+  getDb()
+    .prepare("UPDATE open_lots SET closed_at = ?, winner_id = ?, sold_minor = ? WHERE chain_lot_id = ?")
+    .run(Date.now(), sold?.winnerId ?? null, sold?.amountMinor ?? null, String(chainLotId));
+}
+
+export type LotHistory = {
+  chainLotId: string; title: string; sku: string; artSeed: string | null; category: string | null;
+  openedAt: number; winnerId: string | null; soldMinor: number | null;
+};
+
+/** Closed lots, newest first — the public results the ledger is built from. */
+export function listLotHistory(limit = 60): LotHistory[] {
+  const rows = getDb().prepare(
+    "SELECT chain_lot_id, title, sku, art_seed, category, opened_at, winner_id, sold_minor FROM open_lots WHERE closed_at IS NOT NULL ORDER BY opened_at DESC LIMIT ?",
+  ).all(limit) as { chain_lot_id: string; title: string; sku: string; art_seed: string | null; category: string | null; opened_at: number; winner_id: string | null; sold_minor: number | null }[];
+  return rows.map((r) => ({
+    chainLotId: r.chain_lot_id, title: r.title, sku: r.sku, artSeed: r.art_seed, category: r.category,
+    openedAt: r.opened_at, winnerId: r.winner_id, soldMinor: r.sold_minor,
+  }));
+}
+
+/** An agent's own placed bids, per lot (max amount), from the decision log. */
+export function agentBidsByLot(agentId: string): Map<string, { count: number; maxMinor: number }> {
+  const rows = getDb().prepare("SELECT detail FROM audit_events WHERE agent_id = ? AND kind = 'bid_bid'").all(agentId) as { detail: string }[];
+  const out = new Map<string, { count: number; maxMinor: number }>();
+  for (const r of rows) {
+    try {
+      const d = JSON.parse(r.detail) as { lotId?: string; amountMinor?: number };
+      if (!d.lotId || typeof d.amountMinor !== "number") continue;
+      const cur = out.get(d.lotId) ?? { count: 0, maxMinor: 0 };
+      out.set(d.lotId, { count: cur.count + 1, maxMinor: Math.max(cur.maxMinor, d.amountMinor) });
+    } catch { /* skip malformed */ }
+  }
+  return out;
+}
+
+export function listOpenLots(): { chainLotId: number; title: string; sku: string; artSeed: string | null }[] {
+  const rows = getDb().prepare("SELECT * FROM open_lots WHERE closed_at IS NULL ORDER BY opened_at").all() as
+    { chain_lot_id: string; title: string; sku: string; art_seed: string | null }[];
+  return rows.map((r) => ({ chainLotId: Number(r.chain_lot_id), title: r.title, sku: r.sku, artSeed: r.art_seed }));
+}
+
+/** On boot, sessions a previous process left scheduled/live are over. */
+export function endStaleSessions(): void {
+  getDb().prepare("UPDATE sessions SET status = 'ended' WHERE status IN ('scheduled', 'live')").run();
+}
+
+export function newAgentId(): string {
+  return `agt_${randomBytes(8).toString("hex")}`;
+}
+
+/** Has this agent already received its one-time testnet grant? */
+export function hasGrant(agentId: string): boolean {
+  return Boolean(getDb().prepare("SELECT 1 FROM audit_events WHERE agent_id = ? AND kind = 'agent_granted' LIMIT 1").get(agentId));
 }

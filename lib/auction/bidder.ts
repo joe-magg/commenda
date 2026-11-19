@@ -9,6 +9,7 @@ import { x402Client } from "@x402/core/client";
 import { ExactEvmScheme, type ClientEvmSigner } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 import { listAgents } from "@/lib/db/repo";
+import { getRuntime } from "./runtime";
 import type { BidOutcome } from "./engine";
 
 const NETWORK = "eip155:5042002";
@@ -24,16 +25,16 @@ export type ProposedBid = {
   seller: string;
 };
 
-/** Enabled registry agents that also have a signing key in env. */
+/** Enabled registry agents the server can sign for: house agents (keys in
+ *  AGENT_KEYS) and user agents (keys derived from AGENT_MASTER_SEED). */
 export function getPaidAgents(): PaidAgent[] {
-  let keys: Record<string, string> = {};
-  try { keys = JSON.parse(process.env.AGENT_KEYS ?? "{}"); } catch { /* kill-switched */ }
+  const keys = getRuntime().keys;
   const out: PaidAgent[] = [];
   for (const a of listAgents()) {
     if (!a.enabled || !a.walletAddress) continue;
-    const raw = keys[a.id] ?? keys[a.walletAddress.toLowerCase()];
+    const raw = keys[a.id];
     if (typeof raw !== "string" || !/^0x[a-f0-9]{64}$/i.test(raw)) continue;
-    out.push({ id: a.id, label: a.label, key: raw as `0x${string}` });
+    out.push({ id: a.id, label: a.label, key: raw });
   }
   return out;
 }

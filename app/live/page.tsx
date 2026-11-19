@@ -1,29 +1,26 @@
-import { listAgents } from "@/lib/db/repo";
 import { currentUser } from "@/lib/auth";
-import { AuctionRoom, type AgentView } from "@/components/auction-room";
+import { listAgents } from "@/lib/db/repo";
+import { isUserAgent } from "@/lib/agents/wallets";
+import { Floor, type MyAgent } from "@/components/screens/floor";
 
 export const dynamic = "force-dynamic";
 
-/** Spectator view of the live auction. Only YOUR agents' budgets are shown. */
-export default async function Live() {
-  // The registry is the source of truth for the roster. Public info only —
-  // no API keys or wallet keys cross to the client.
+/** the live floor, centred on YOUR agent. Rivals: name + mark only. */
+export default async function Page() {
   const user = await currentUser();
-  const owned = user ? new Set(listAgents(user.id).map((a) => a.id)) : new Set<string>();
-  const agents: AgentView[] = listAgents().map((a) => ({
-    id: a.id,
-    label: a.label,
-    short: a.walletAddress
-      ? `${a.walletAddress.slice(0, 6)}…${a.walletAddress.slice(-4)}`
-      : `${a.id.slice(0, 6)}…`,
-    budgetMinor: a.policy.budgetMinor,
-    perBidCapMinor: a.policy.perBidCapMinor,
-    watchlist: a.policy.watchlist,
-    approvalEnabled: a.policy.approvalEnabled,
-    approvalAboveMinor: a.policy.approvalAboveMinor,
-    maxWins: a.policy.maxWins,
-    active: a.enabled && a.walletAddress !== null,
-    owned: owned.has(a.id),
-  }));
-  return <AuctionRoom agents={agents} />;
+  const all = listAgents();
+  const own = user ? listAgents(user.id).filter((a) => isUserAgent(a.id)) : [];
+  // Your most recent agent on the floor, else your most recent one.
+  const pick = [...own].reverse().find((a) => a.enabled) ?? own.at(-1);
+  const mine: MyAgent = pick ? {
+    id: pick.id, label: pick.label, enabled: pick.enabled, strategy: pick.policy.strategy,
+    ceilingMinor: pick.policy.perBidCapMinor, budgetMinor: pick.policy.budgetMinor, maxWins: pick.policy.maxWins,
+  } : null;
+  // Public roster: names and marks only — no budgets, no strategies.
+  const agents = all
+    .filter((a) => a.enabled && a.walletAddress)
+    .map((a) => ({ id: a.id, label: a.label, live: true }))
+    // Your agent takes the first seat.
+    .sort((a, b) => (a.id === mine?.id ? -1 : b.id === mine?.id ? 1 : 0));
+  return <Floor agents={agents} mine={mine} />;
 }

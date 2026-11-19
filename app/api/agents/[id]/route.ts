@@ -2,6 +2,8 @@
 import { currentUser } from "@/lib/auth";
 import { getAgent, setAgentEnabled, updatePolicy, type Policy } from "@/lib/db/repo";
 import { syncAgentPolicy } from "@/lib/auction/runtime";
+import { getWorkerPool } from "@/lib/auction/worker-pool";
+import { isUserAgent, MIN_FLOOR_BALANCE_MINOR, usdcBalance } from "@/lib/agents/wallets";
 
 export const runtime = "nodejs";
 
@@ -25,8 +27,17 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
   // Enabling without a wallet is allowed — the worker pool (next phase) skips
   // agents that have no signing key, and the UI shows them as unfunded.
   if (typeof body.enabled === "boolean") {
+    // A user agent goes to the floor only once its wallet can actually pay.
+    if (body.enabled && isUserAgent(id) && existing.walletAddress) {
+      const balance = await usdcBalance(existing.walletAddress).catch(() => 0);
+      if (balance < MIN_FLOOR_BALANCE_MINOR) {
+        return Response.json({ error: "fund your agent first", balanceMinor: balance }, { status: 409 });
+      }
+    }
     const agent = setAgentEnabled(id, body.enabled);
     if (agent) await syncAgentPolicy(agent);
+    // Recall: stop bidding on the current lot now, not at the next one.
+    if (!body.enabled) getWorkerPool().recall(id);
     return Response.json({ agent });
   }
 

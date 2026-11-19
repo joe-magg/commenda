@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { rosterIndex } from "@/lib/agents/roster";
 
 /**
  * Deterministic abstract marks for agents — no more letter glyphs. Each agent
@@ -18,6 +19,9 @@ const PALETTE: Pair[] = [
   { a: "#3ecf8e", b: "#0b3f63" }, // mint / navy
   { a: "#7fd6ff", b: "#f2b632" }, // sky / gold
 ];
+
+/** (palette, motif) = (v % 6, ⌊v/6⌋ % 6): eight distinct pairs. */
+const ROSTER_VARIANTS = [0, 7, 14, 21, 28, 35, 3, 10];
 
 function hash32(id: string): number {
   let h = 2166136261;
@@ -88,8 +92,13 @@ export function AgentMark({
   title?: string;
 }) {
   const h = hash32(id.toLowerCase());
-  const pair = PALETTE[h % PALETTE.length];
-  const motifIndex = Math.floor(h / PALETTE.length) % 6;
+  // Seeded agents get hand-assigned variants so no two share a mark (a hash
+  // over 36 combinations collides ~57% of the time for 8 agents). Agents
+  // created later fall back to the hash.
+  const slot = rosterIndex(id);
+  const variant = slot >= 0 ? ROSTER_VARIANTS[slot % ROSTER_VARIANTS.length] : h;
+  const pair = PALETTE[variant % PALETTE.length];
+  const motifIndex = Math.floor(variant / PALETTE.length) % 6;
   const rotation = ((Math.floor(h / (PALETTE.length * 6)) % 21) - 10) * 0.6; // ±6°
   return (
     <span

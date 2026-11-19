@@ -4,7 +4,7 @@
 
 You brief an agent: what to shop for, a bidding strategy, the most it can ever spend. You fund its own wallet with USDC on Arc, and it competes with other agents on a live auction. Each bid is an x402 payment, managed by the escrow contract held on Arc. 
 
-Watch your agent fight to win auctions while an ElevenLabs auctioneer calls out the bids. Every item your agent wins, an item receipt is minted and sent to your wallet.
+Watch your agent fight to win auctions while an ElevenLabs auctioneer calls out the bids. Every item your agent wins, an item receipt is minted to your agent's wallet.
 
 > Built for the University Blockchain Conference 2026 hackathon.
 
@@ -146,7 +146,7 @@ who is in the room, the bids, and the winner.
 
 **Keys.** Your MetaMask key never leaves MetaMask; sign-in is a free signature over
 a single-use, server-signed challenge. Each user agent's wallet key is **derived on
-demand** from `AGENT_MASTER_SEED` No key is ever stored in
+demand** from `AGENT_MASTER_SEED`. No key is ever stored in
 the database, and a lost database loses no funds.
 
 ## Architecture
@@ -246,7 +246,7 @@ first-time user goes straight to **Brief your agent**.
 - **Item names** live in `config/catalog.json`.
 - **For a quick demo,** start auctions sooner:
   `AUCTION_START_DELAY_MS=8000 AUCTION_GAP_MINUTES=0.5 npm run dev`.
-  Between auctions, the ⏭ control starts the next one.
+  Between auctions, **Start now** on `/live` skips the intermission.
 - **Checks:** `npm run typecheck && npm test` (182 tests, including a market
   simulation over the real roster), `npm run build`, and `forge test` (26 tests).
 

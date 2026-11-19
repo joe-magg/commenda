@@ -1,5 +1,6 @@
 "use client";
 
+import { SignOutButton } from "@/components/sign-out";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "motion/react";
@@ -94,6 +95,7 @@ export function Ledger({ userName }: { userName: string }) {
             <a href="/live" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 font-sans text-[13px] font-bold text-white shadow-[0_8px_24px_rgba(11,63,99,0.3)]">
               Watch the floor <ArrowRight className="size-3.5" />
             </a>
+            <SignOutButton />
           </div>
         </header>
 

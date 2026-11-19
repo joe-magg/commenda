@@ -36,7 +36,10 @@ export async function settleLot(lot: LotRecord): Promise<SettleResult> {
           { title: lot.title, sku: lot.sku, amountMinor: hb.amountMinor, artSeed: lot.artSeed ?? undefined },
           winnerId,
         );
-        const mint = await mintReceipt(lot.chainLotId, winnerId, uri);
+        // The receipt contract only mints to the escrow's recorded winner —
+        // the winning WALLET address (hb.bidder), never an internal agent id
+        // (user agents' ids are "agt_…", which is not an address).
+        const mint = await mintReceipt(lot.chainLotId, hb.bidder, uri);
         console.info("[commenda:receipt] minted", JSON.stringify({ lot: lot.chainLotId, tokenId: mint.tokenId, winner: winnerId }));
       } catch (e) {
         // Best effort: a mint failure must not stall the show.

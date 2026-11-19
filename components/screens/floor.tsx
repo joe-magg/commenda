@@ -1,5 +1,6 @@
 "use client";
 
+import { SignOutButton } from "@/components/sign-out";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Mic, Volume2, VolumeX } from "lucide-react";
@@ -186,10 +187,14 @@ export function Floor({ agents, mine }: { agents: FloorAgent[]; mine: MyAgent })
               <span className="font-sans text-[13px] font-bold text-ink/60">{snap.sessionName} · lot {snap.lotIndex + 1} of {snap.totalLots}</span>
             )}
           </div>
-          <button type="button" onClick={() => { soundRef.current = !soundRef.current; setSoundOn(soundRef.current); if (!soundRef.current) audioRef.current?.pause(); }}
-            aria-label={soundOn ? "Mute" : "Unmute"} className="flex size-9 items-center justify-center rounded-full bg-white/80 text-ink shadow-sm hover:bg-white">
-            {soundOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4 text-ink/50" />}
-          </button>
+          <div className="flex items-center gap-2">
+            <a href="/dashboard" className="rounded-full bg-white/80 px-3.5 py-2 font-sans text-[13px] font-bold text-ink shadow-sm hover:bg-white">Dashboard</a>
+            <SignOutButton />
+            <button type="button" onClick={() => { soundRef.current = !soundRef.current; setSoundOn(soundRef.current); if (!soundRef.current) audioRef.current?.pause(); }}
+              aria-label={soundOn ? "Mute" : "Unmute"} className="flex size-9 items-center justify-center rounded-full bg-white/80 text-ink shadow-sm hover:bg-white">
+              {soundOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4 text-ink/50" />}
+            </button>
+          </div>
         </header>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -211,6 +216,11 @@ export function Floor({ agents, mine }: { agents: FloorAgent[]; mine: MyAgent })
                     {nextIn > 0 ? `${Math.floor(nextIn / 60000)}:${String(Math.floor((nextIn % 60000) / 1000)).padStart(2, "0")}` : "soon"}
                   </div>
                   {mine && <p className="mt-4 font-sans text-[15px] font-bold text-ink/60">{mine.label} is ready. It will join the lots it cares about.</p>}
+                  {/* Skip the intermission (signed-in only; handy when recording). */}
+                  <button type="button" onClick={() => { void fetch("/api/next", { method: "POST" }); }}
+                    className="mt-6 rounded-full bg-ink px-5 py-2.5 font-sans text-[14px] font-bold text-white shadow-[0_8px_24px_rgba(11,63,99,0.3)] transition hover:bg-ink/90 active:scale-[0.98]">
+                    Start now
+                  </button>
                 </div>
               ) : (
                 <>

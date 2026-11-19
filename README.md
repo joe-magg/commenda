@@ -300,7 +300,11 @@ Amounts are USDC minor units (6 decimals).
 
 ## Products used
 Blockchain - Arc (testnet), USDC, Circle x402 facilitator, x402, foundry, wagmi, viem
+
 ElevenLabs - Text-to-Speech + Voice Library
+
 Webapp Stack - Next.js, React, TypeScript, Tailwind, Motion, shadcn, Magic UI and React Bits (through shadcn MCP)
+
 Database: `node:sqlite`.
+
 AI for Development: Opencode using models `hy4-flash-free` and `glm-5.3-flash` (around 80% of tokens used), and Claude Code using model Opus 5.5 (around 20% of tokens used).

@@ -1,29 +1,14 @@
 # Commenda
 
-**Send your agent to the auction.** Commenda is a live auction run entirely by
-agents. You brief an agent: what to shop for, how to bid, and the most it may ever
-spend. You fund its own wallet with USDC on Arc, and it competes on a live auction
-floor against other agents while an ElevenLabs auctioneer calls every bid out loud.
-Every bid is a real x402 payment and a real escrow transaction on Arc. No model ever
-touches money: agents propose, deterministic code decides, and the escrow holds the funds.
+**Send your agent to the auction.** Commenda is a live auction where bidding is run entirely by agents. Built on Arc.
+
+You brief an agent: what to shop for, a bidding strategy, the most it can ever spend. You fund its own wallet with USDC on Arc, and it competes with other agents on a live auction. Each bid is an x402 payment, managed by the escrow contract held on Arc. 
+
+Watch your agent fight to win auctions while an ElevenLabs auctioneer calls out the bids. Every item your agent wins, an item receipt is minted and sent to your wallet.
 
 > Built for the University Blockchain Conference 2026 hackathon.
-> Main track: **Agentic Payments and AI** · Chain award: **Best use of Arc** · Bounty: **ElevenLabs**
 
----
-
-## Contents
-
-- [What it does](#what-it-does)
-- [How Commenda uses Arc](#how-commenda-uses-arc) (contract addresses)
-- [How Commenda uses ElevenLabs](#how-commenda-uses-elevenlabs)
-- [The agent's decision loop](#the-agents-decision-loop)
-- [Safety limits](#safety-limits)
-- [Architecture](#architecture)
-- [Run it locally](#run-it-locally)
-- [Agent API](#agent-api)
-- [Repository layout](#repository-layout)
-- [Design decisions and known limits](#design-decisions-and-known-limits)
+<img width="1920" height="808" alt="image" src="https://github.com/user-attachments/assets/54d67a3d-b4ff-47e1-b097-f19454ad01c1" />
 
 ---
 
@@ -42,20 +27,12 @@ touches money: agents propose, deterministic code decides, and the escrow holds 
    that competes.
 2. **Fund it.** The agent gets its own wallet on Arc. You send it USDC from MetaMask
    (or take a one-time testnet grant). It can only ever spend what you deposit.
-3. **Watch it work** (`/live`). Your agent joins the lots it cares about. The agents
-   in the room orbit the item; the leader is drawn closest. A private panel, visible
-   only to you, says in plain words what *your* agent is doing ("Holding back — it
-   strikes in the final seconds", "Out. The next bid would pass your 2.50 ceiling")
-   and shows the price against your ceiling. Rivals show only a name. **Recall**
-   stops your agent instantly.
-4. **See what came home** (`/dashboard`). Each win is a holo card and an on-chain,
+3. **Watch it work** (`/live`). Your agent joins the lots it cares about. You can monitor exactly what your agent is doing ("Holding back — it
+   strikes in the final seconds", "Out. The next bid would pass your 2.50 ceiling"). **Recall** stops your agent instantly.
+4. **See what it won** (`/dashboard`). Each win is a holo card and an on-chain,
    non-transferable (soulbound) receipt. You also get a line per lot ("Went to 1.50,
    then stopped — Agent B took it for 2.05") and your wallet controls. **Bring funds
    home** returns the balance to your sign-in address.
-
-Auctions run on a schedule: an intermission with the next catalog published, then one
-lot per category with a soft close. A bid during *"going once, going twice"* reopens
-the lot.
 
 ## How Commenda uses Arc
 
@@ -65,12 +42,11 @@ All on-chain functionality runs on **Arc testnet** (chain id `5042002`):
 |---|---|---|
 | `AuctionEscrow` (ours, Foundry) | [`0xB1e11FCF92439A0F71daaefCC4B51c276210Ea45`](https://explorer.testnet.arc.io/address/0xB1e11FCF92439A0F71daaefCC4B51c276210Ea45) | Holds every bid. The outbid bidder is refunded in the same transaction; `settle` pays the seller and the winner gets the lot |
 | `ReceiptNFT` (ours, Foundry) | [`0x050c0DDd11dDc5D68b403F18922240e0DEeCe15C`](https://explorer.testnet.arc.io/address/0x050c0DDd11dDc5D68b403F18922240e0DEeCe15C) | Soulbound receipt minted to each winner (on-chain SVG metadata) |
-| USDC (Arc native, ERC-20 interface) | [`0x3600000000000000000000000000000000000000`](https://explorer.testnet.arc.io/address/0x3600000000000000000000000000000000000000) | The currency for bids, fees, deposits **and gas** |
 | House treasury / auctioneer | [`0x35Cfc9c9fa91caa7E1F66e119d5196CdE943E9Be`](https://explorer.testnet.arc.io/address/0x35Cfc9c9fa91caa7E1F66e119d5196CdE943E9Be) | Settles lots, receives sale proceeds and x402 fees, funds testnet grants |
+| USDC (Arc native, ERC-20 interface) | [`0x3600000000000000000000000000000000000000`](https://explorer.testnet.arc.io/address/0x3600000000000000000000000000000000000000) | The currency for bids, fees, deposits **and gas** |
 
 - **USDC as gas.** On Arc, USDC is the gas token, so an agent's single USDC deposit
-  pays for both its bids and its transactions. The fund screen says exactly that: no
-  second token, and fees are predictable fractions of a cent.
+  pays for both its bids and its transactions.
 - **x402 settled by Circle on Arc.** Each bid carries a $0.001 USDC x402 payment
   (EIP-3009 authorization). Circle's facilitator verifies and settles it on Arc, and
   only after the bid's escrow transaction has confirmed. A rejected or reverted bid
@@ -78,17 +54,16 @@ All on-chain functionality runs on **Arc testnet** (chain id `5042002`):
 - **Arc's sub-second finality** lets a bid be confirmed before the server answers
   "placed". The engine only ever shows receipt-confirmed bids.
 - **Chain truth everywhere.** Winners and prices come from escrow state, not local
-  memory. Agent budgets are rebuilt from `BidPlaced` events. A crash mid-auction is
-  recovered on the next boot by settling every lot that was left open.
-- **Foundry** builds and tests the contracts (`forge test`: 26 tests).
+  memory. Agent budgets are rebuilt from `BidPlaced` events.
+- **Foundry** builds and tests the contracts.
 
 ## How Commenda uses ElevenLabs
 
 **Product: ElevenLabs Text-to-Speech API** (`POST /v1/text-to-speech/{voice_id}`)
 with the **`eleven_flash_v2_5`** model and **"Imogen"** from the **ElevenLabs Voice
-Library** (`jv41DhCf464zw0TI7I1w`).
+Library**.
 
-The auctioneer is the show's host. The engine speaks on every event:
+The auctioneer is the show's host:
 
 | Moment | Example line |
 |---|---|
@@ -100,15 +75,10 @@ The auctioneer is the show's host. The engine speaks on every event:
 
 How it works (`lib/voice/`):
 
-- **Templates only.** Every line is a whitelisted template with validated numeric
-  slots. Item names come from the server's own catalog and agent names must match a
-  strict pattern, so no user- or agent-supplied text can ever reach the voice.
+- **Templates only.** Every line is a whitelisted template with validated item names from the server's catalog.
 - **Cache first.** Audio is cached by voice, model and text. A replayed line costs
-  nothing. Lines arrive on screen as **captions** while the audio plays, so the show
-  still works muted.
-- **A spend ledger for TTS** (`agent-budget.json`): a per-process character
-  ceiling, generations per lot, requests per minute, a failure circuit breaker, a
-  kill switch (`VOICE_KILL_SWITCH`) and a `DRY_RUN` mode.
+  nothing. Captions arrive on screen while the audio plays.
+- **A spend ledger for TTS** (`agent-budget.json`): character ceiling, generations per lot, requests per minute, a failure circuit breaker, and a kill switch.
 
 ## The agent's decision loop
 
@@ -124,7 +94,7 @@ flowchart LR
 
 1. **Watch.** Each round, every agent in the lot reads the market: the open lot, the
    receipt-confirmed highest bid, the leader, the phase and the seconds left.
-2. **Choose** (`lib/agents/strategy.ts`, pure and deterministic). The agent compares
+2. **Choose** (`lib/agents/strategy.ts`, deterministic). The agent compares
    the next valid bid to its limit. For your agent, the limit is exactly the ceiling
    you set; house agents derive a private per-item valuation. The style decides
    *when* and *how much*:
@@ -134,7 +104,7 @@ flowchart LR
    - bargain walks away at 70% of its limit
 
    The floor recognises one hand per round, like a real auctioneer.
-3. **Authorize** (`lib/auction/decide.ts`, pure, table-tested, the sole authority).
+3. **Authorize** (`lib/auction/decide.ts`, the sole authority).
    Before anything touches the chain, the server binds the bid to the lot actually on
    the block. The agent states only *which lot* and *how much*; the category and
    seller are server facts. Then every guardrail below runs.
@@ -149,8 +119,8 @@ decision log (`audit_events`) with the exact rule that fired.
 
 ## Safety limits
 
-Agents **propose**; deterministic code **decides**. Agents cannot read or change
-their own limits, and a rejection reveals only an opaque rule code, never numbers.
+Agents **propose** bidding action, and deterministic code **decides**. Agents cannot read or change
+their own limits.
 
 | Limit | Set by | Value / behaviour |
 |---|---|---|
@@ -166,20 +136,18 @@ their own limits, and a rejection reveals only an opaque rule code, never number
 | Idempotency (`IDEMPOTENCY`) | Server | The same agent + lot + amount can never be submitted twice; the x402 payment id is idempotent too |
 | Velocity (`VELOCITY`) | Server | At most 20 bids per 60 s per agent |
 | Circuit breaker (`CIRCUIT_BREAKER`) | Server | 3 consecutive failed transactions stop the agent |
-| Approval threshold (`APPROVAL_REQUIRED`) | Policy | Supported and tested in the rule engine; not yet exposed in the UI (see [known limits](#design-decisions-and-known-limits)) |
 | No charge on failure | x402 | The fee settles only on success; rejected or reverted bids are free |
 | Withdraw destination | Server | Funds leave an agent wallet only as escrow bids, or to its **owner's sign-in address** |
 | Testnet grant | Server | One per agent, recorded before the transfer (no double grant) |
 
 **Privacy.** Your agent's reasoning, limits and block reasons reach only you; the
 live stream filters private events per viewer. Other viewers see public facts only:
-who is in the room, the bids, the winner.
+who is in the room, the bids, and the winner.
 
 **Keys.** Your MetaMask key never leaves MetaMask; sign-in is a free signature over
 a single-use, server-signed challenge. Each user agent's wallet key is **derived on
-demand** (HKDF from `AGENT_MASTER_SEED` + the agent's id). No key is ever stored in
-the database, and a lost database loses no funds. Session cookies are HMAC-signed
-and expire.
+demand** from `AGENT_MASTER_SEED` No key is ever stored in
+the database, and a lost database loses no funds.
 
 ## Architecture
 
@@ -270,7 +238,7 @@ first-time user goes straight to **Brief your agent**.
 
 - The **deployed contracts above are used as-is**. Set `ESCROW_ADDRESS` and
   `RECEIPT_NFT_ADDRESS` to them; you don't need to redeploy.
-- **House agents** (the rivals) are eight funded wallets listed in
+- **House agents** (the rivals) are eight funded wallets for the demo listed in
   `config/agents.json`. Their keys go in `AGENT_KEYS`. Each needs a little test
   USDC.
 - **Item names** live in `config/catalog.json`.
@@ -315,31 +283,22 @@ Amounts are USDC minor units (6 decimals).
 
 ## Design decisions and known limits
 
-- **Deterministic agents, on purpose.** When software spends money, every decision
+- **Deterministic agents.** When software spends money, every decision
   should be reproducible and auditable. A smarter strategy (a decision model or an
   LLM) plugs in as just another strategy that *proposes*; it still can't move money,
-  because `decide()` decides. That's the next step.
+  because `decide()` decides. Decision models would be the next step, since they output structured probabilities for quick decision making. Custom decision models could be used to optimize bidding strategies to win more auctions for lower prices.
 - **Server-held agent keys.** An agent has to sign every bid on its own, in real time,
-  and a browser wallet never signs without a human click. The deposit bounds the
-  risk. Production would move the master seed into a KMS, or use Circle
+  and a browser wallet never signs without a human click. Production would move the master seed into a KMS, or use Circle
   Developer-Controlled (MPC) Wallets or smart-account session keys.
-- **Human approval** for large bids exists in the rule engine (`NEEDS_APPROVAL`, with
-  tests) but has no approval UI yet. A live lot moves in seconds, so it needs a fast
-  approve-from-phone flow.
-- **Outside agents** can read the floor and call the paid bid endpoint, but the escrow
-  bid is signed with a server-held key, so a third-party agent needs a registered
-  wallet today.
 - **Single process.** Auction state is in memory and SQLite holds the registry; the
-  design assumes one instance (Railway-ready Dockerfile included).
+  design assumes one instance (next step: Deploy live on Railway).
 - **Escrow refunds the outbid bidder in the same transaction.** Better capital
   mobility than holding funds until settlement, at the cost of needing the full new
   amount liquid at bid time.
 
 ## Products used
-
-Arc testnet · USDC · Circle x402 facilitator · x402 (`@x402/*`) · ElevenLabs
-Text-to-Speech + Voice Library · Foundry · Next.js 16 · React 19 · TypeScript ·
-Tailwind v4 · Motion · viem · wagmi · Magic UI + React Bits (via shadcn) ·
-`node:sqlite`.
-
-MIT licensed.
+Blockchain - Arc (testnet), USDC, Circle x402 facilitator, x402, foundry, wagmi, viem
+ElevenLabs - Text-to-Speech + Voice Library
+Webapp Stack - Next.js, React, TypeScript, Tailwind, Motion, shadcn, Magic UI and React Bits (through shadcn MCP)
+Database: `node:sqlite`.
+AI for Development: Opencode using models `hy4-flash-free` and `glm-5.3-flash` (around 80% of tokens used), and Claude Code using model Opus 5.5 (around 20% of tokens used).

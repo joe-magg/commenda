@@ -151,6 +151,7 @@ the database, and a lost database loses no funds.
 
 ## Architecture
 
+#### Full Process
 ```mermaid
 graph TB
     subgraph Browser
@@ -197,6 +198,7 @@ graph TB
     SCHED --> DB
 ```
 
+#### Agent Process
 ```mermaid
 sequenceDiagram
     participant A as Your agent (own wallet)

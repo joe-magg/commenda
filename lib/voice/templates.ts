@@ -35,6 +35,8 @@ export function speakAmount(minor: number): string {
   const dollars = Math.floor(cents / 100);
   const remainder = cents % 100;
   if (remainder === 0) return `${dollars} dollar${dollars === 1 ? "" : "s"}`;
+  // "2 dollars 5" would sound like 2.50 — single-digit cents get spelled out.
+  if (remainder < 10) return `${dollars} dollar${dollars === 1 ? "" : "s"} and ${remainder} cent${remainder === 1 ? "" : "s"}`;
   return `${dollars} dollar${dollars === 1 ? "" : "s"} ${remainder}`;
 }
 

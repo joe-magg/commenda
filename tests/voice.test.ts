@@ -67,6 +67,7 @@ describe("voice templates — no free text reaches TTS", () => {
     expect(speakAmount(2_000_000)).toBe("2 dollars");
     expect(speakAmount(1_500_000)).toBe("1 dollar 50");
     expect(speakAmount(2_350_000)).toBe("2 dollars 35");
+    expect(speakAmount(2_050_000)).toBe("2 dollars and 5 cents");
     expect(formatMinor(600_000)).toBe("0.60");
   });
 });

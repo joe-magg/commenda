@@ -3,7 +3,7 @@
 import { SignOutButton } from "@/components/sign-out";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Mic, Volume2, VolumeX } from "lucide-react";
+import { ArrowUpRight, Mic, Volume2, VolumeX } from "lucide-react";
 import type { AuctionEvent, EngineSnapshot, MindState } from "@/lib/auction/engine";
 import { formatMinor, type Lot } from "@/lib/auction/lots";
 import { playSfx } from "@/lib/client/sfx";
@@ -15,6 +15,7 @@ export type FloorAgent = { id: string; label: string; live: boolean };
 export type MyAgent = {
   id: string; label: string; enabled: boolean; strategy: string;
   ceilingMinor: number; budgetMinor: number; maxWins: number;
+  walletAddress: string | null;
 } | null;
 
 type BidRow = { key: string; label: string; agentId: string; amountMinor: number; late?: boolean };
@@ -320,6 +321,12 @@ export function Floor({ agents, mine }: { agents: FloorAgent[]; mine: MyAgent })
                   className={`mt-6 w-full rounded-2xl py-3 font-sans text-[14px] font-bold transition active:scale-[0.98] ${enabled ? "border border-white/20 text-white hover:bg-white/10" : "bg-white text-ink hover:bg-white/90"}`}>
                   {enabled ? "Recall agent" : `Send ${mine.label} back in`}
                 </button>
+                {mine.walletAddress && (
+                  <a href={`https://explorer.testnet.arc.io/address/${mine.walletAddress}`} target="_blank" rel="noreferrer"
+                  className="mt-3 flex items-center justify-center gap-1.5 font-sans text-[12px] font-bold text-white/55 transition hover:text-white">
+                  View its wallet on ArcScan <ArrowUpRight className="size-3.5" />
+                </a>
+                )}
               </section>
             ) : (
               <section className="rounded-[26px] bg-ink p-6 text-white">

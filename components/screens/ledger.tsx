@@ -4,7 +4,7 @@ import { SignOutButton } from "@/components/sign-out";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "motion/react";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
 import { formatMinor } from "@/lib/auction/lots";
 import { cardArtDataUri } from "@/lib/items/card-art";
 import { AgentMark } from "@/components/agent-mark";
@@ -168,6 +168,12 @@ export function Ledger({ userName }: { userName: string }) {
                     </>
                   )}
                 </div>
+                {a.walletAddress && (
+                  <a href={`https://explorer.testnet.arc.io/address/${a.walletAddress}`} target="_blank" rel="noreferrer"
+                  className="mt-3 flex items-center justify-center gap-1.5 font-sans text-[12px] font-bold text-white/55 transition hover:text-white">
+                  View its wallet on ArcScan <ArrowUpRight className="size-3.5" />
+                </a>
+                )}
               </section>
             ))}
             {note && <p className="font-sans text-[13px] font-bold text-ink/70">{note}</p>}

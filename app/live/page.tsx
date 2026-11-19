@@ -15,6 +15,7 @@ export default async function Page() {
   const mine: MyAgent = pick ? {
     id: pick.id, label: pick.label, enabled: pick.enabled, strategy: pick.policy.strategy,
     ceilingMinor: pick.policy.perBidCapMinor, budgetMinor: pick.policy.budgetMinor, maxWins: pick.policy.maxWins,
+    walletAddress: pick.walletAddress,
   } : null;
   // Public roster: names and marks only — no budgets, no strategies.
   const agents = all

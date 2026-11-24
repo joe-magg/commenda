@@ -14,7 +14,7 @@
   "dependencies": {
     "@tanstack/react-query": "5.108.0",
     "@wagmi/connectors": "8.2.4",
-    "@x402/core": "2.31.0",
+    "@x402/core": "2.32.0",
     "@x402/evm": "2.31.0",
     "@x402/extensions": "2.31.0",
     "@x402/fetch": "2.31.0",
